@@ -1,0 +1,22 @@
+name = "stellar-ai-worker"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "stellar-ai-db"
+database_id = "YOUR_D1_DATABASE_ID"   # replace after: wrangler d1 create stellar-ai-db
+
+# Cron for 6-month history cleanup
+[triggers]
+crons = ["0 3 * * *"]   # runs daily at 3am UTC
+
+# Secrets (set via: wrangler secret put SECRET_NAME)
+# GROQ_API_KEY
+# JWT_SECRET
+# NEON_DATABASE_URL
+# TAVILY_API_KEY
+# GRADIO_URL
+# ALLOWED_ORIGIN   (your CF Pages URL, e.g. https://stellar-ai.pages.dev)

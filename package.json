@@ -1,0 +1,14 @@
+{
+  "name": "stellar-ai",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["frontend", "worker"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=frontend\" \"npm run dev --workspace=worker\"",
+    "build": "npm run build --workspace=frontend",
+    "deploy": "npm run deploy --workspace=worker && npm run deploy --workspace=frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
