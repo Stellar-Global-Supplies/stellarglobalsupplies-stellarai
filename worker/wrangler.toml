@@ -1,22 +1,45 @@
 name = "stellar-ai-worker"
 main = "src/index.js"
-compatibility_date = "2024-09-23"
+compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
 # D1 Database binding
 [[d1_databases]]
-binding = "DB"
+binding       = "DB"
 database_name = "stellar-ai-db"
-database_id = "YOUR_D1_DATABASE_ID"   # replace after: wrangler d1 create stellar-ai-db
+database_id   = "7c98c739-c76c-4eeb-9ddd-699d0e832799"
 
 # Cron for 6-month history cleanup
 [triggers]
-crons = ["0 3 * * *"]   # runs daily at 3am UTC
+crons = ["0 3 * * *"]
 
-# Secrets (set via: wrangler secret put SECRET_NAME)
-# GROQ_API_KEY
-# JWT_SECRET
-# NEON_DATABASE_URL
-# TAVILY_API_KEY
-# GRADIO_URL
-# ALLOWED_ORIGIN   (your CF Pages URL, e.g. https://stellar-ai.pages.dev)
+# Secrets Store bindings
+[[secrets_store_secrets]]
+binding     = "GROQ_API_KEY"
+secret_name = "GROQ_API_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "JWT_SECRET"
+secret_name = "JWT_SECRET"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "NEON_DATABASE_URL"
+secret_name = "NEON_DATABASE_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "TAVILY_API_KEY"
+secret_name = "TAVILY_API_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "GRADIO_URL"
+secret_name = "GRADIO_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "ALLOWED_ORIGIN"
+secret_name = "ALLOWED_ORIGIN"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
