@@ -87,7 +87,7 @@ export default function App() {
   const sendMessage = useCallback(async ({ text, file, imgPrompt }) => {
     if (isTyping) return
 
-    addMessage({ role: 'user', text, file: file?.name })
+    addMessage({ role: 'user', text, file: file?.name, ts: Date.now() })
 
     if (text) {
       const title = text.length > 36 ? text.slice(0, 36) + '…' : text
@@ -98,7 +98,7 @@ export default function App() {
 
     // Image gen branch
     if (imgGen && imgPrompt) {
-      addMessage({ role: 'assistant', text: '', status: 'Generating image…', imgPrompt })
+      addMessage({ role: 'assistant', text: '', status: 'Generating image…', imgPrompt, ts: Date.now() })
       try {
         const res = await fetch(`${WORKER_URL}/api/imagine`, {
           method: 'POST',
@@ -115,7 +115,7 @@ export default function App() {
     }
 
     // Chat branch — SSE streaming
-    addMessage({ role: 'assistant', text: '', status: 'Launching worker…' })
+    addMessage({ role: 'assistant', text: '', status: 'Launching worker…', ts: Date.now() })
 
     try {
       let body, headers = { Authorization: `Bearer ${token}` }
@@ -181,9 +181,11 @@ export default function App() {
         open={sidebarOpen}
         history={history}
         user={auth.user}
+        token={token}
         onLogout={handleLogout}
         onNewChat={() => setMessages([])}
         onSelectHistory={id => setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))}
+        onDeleteHistory={id => setHistory(prev => prev.filter(h => h.id !== id))}
       />
       <main className="main">
         <Topbar

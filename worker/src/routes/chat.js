@@ -7,8 +7,8 @@ an industrial supply company. You help with procurement analysis, supplier evalu
 pricing intelligence, inventory management, and data analysis. 
 Be concise, precise, and professional. Use markdown for structured responses.`
 
-function sse(writer, enc, event, data) {
-  writer.write(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+function sse(writer, enc, type, data) {
+  writer.write(enc.encode(`data: ${JSON.stringify({ type, ...data })}\n\n`))
 }
 
 async function resolveSecret(binding) {

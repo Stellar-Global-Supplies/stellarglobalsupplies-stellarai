@@ -1,4 +1,4 @@
-import { forwardRef } from 'react'
+import { forwardRef, useState, useEffect, useRef } from 'react'
 
 function renderMarkdown(text) {
   if (!text) return ''
@@ -12,8 +12,8 @@ function renderMarkdown(text) {
     .replace(/^/, '<p>').replace(/$/, '</p>')
 }
 
-function fmtTime() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function fmtTime(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 function AssistantLogo() {
@@ -30,8 +30,7 @@ function AssistantLogo() {
 function CopyIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="9" y="9" width="13" height="13" rx="2"/>
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
     </svg>
   )
 }
@@ -42,31 +41,47 @@ function UserMessage({ msg }) {
       {msg.file && (
         <div className="file-chip" style={{ marginBottom: 6 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
           </svg>
           <span>{msg.file}</span>
         </div>
       )}
       {msg.text && <div className="msg-bubble">{msg.text}</div>}
       <div className="msg-meta">
-        <span className="msg-time">{fmtTime()}</span>
-        <div className="msg-actions">
-          <button className="msg-action-btn" title="Copy" onClick={() => navigator.clipboard.writeText(msg.text)}>
-            <CopyIcon />
-          </button>
-        </div>
+        <span className="msg-time">{fmtTime(msg.ts)}</span>
       </div>
     </div>
   )
 }
 
 function AssistantMessage({ msg }) {
+  const startRef  = useRef(msg.ts)
+  const [elapsed, setElapsed] = useState(null)
+
+  // Start a live timer while streaming, freeze when done
+  useEffect(() => {
+    if (!msg.status && msg.text) {
+      // Response complete — show final elapsed
+      const secs = ((Date.now() - startRef.current) / 1000).toFixed(1)
+      setElapsed(secs)
+      return
+    }
+    if (msg.status) {
+      const id = setInterval(() => {
+        setElapsed(((Date.now() - startRef.current) / 1000).toFixed(1))
+      }, 100)
+      return () => clearInterval(id)
+    }
+  }, [msg.status, msg.text])
+
   return (
     <div className="message-row assistant">
       <div className="assistant-header">
         <AssistantLogo />
         <span className="assistant-name">Stellar AI</span>
+        {elapsed && (
+          <span className="response-time">{elapsed}s</span>
+        )}
       </div>
 
       {msg.status && (
@@ -85,15 +100,13 @@ function AssistantMessage({ msg }) {
         <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
       ) : !msg.status ? (
         <div className="msg-bubble">
-          <span className="typing-dot"/>
-          <span className="typing-dot"/>
-          <span className="typing-dot"/>
+          <span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/>
         </div>
       ) : null}
 
       {msg.text && !msg.status && (
         <div className="msg-meta">
-          <span className="msg-time">{fmtTime()}</span>
+          <span className="msg-time">{fmtTime(msg.ts)}</span>
           <div className="msg-actions">
             <button className="msg-action-btn" title="Copy" onClick={() => navigator.clipboard.writeText(msg.text)}>
               <CopyIcon />
