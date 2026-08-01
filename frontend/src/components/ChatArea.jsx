@@ -2,14 +2,62 @@ import { forwardRef, useState, useEffect, useRef } from 'react'
 
 function renderMarkdown(text) {
   if (!text) return ''
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/\n/g, '<br/>')
-    .replace(/^/, '<p>').replace(/$/, '</p>')
+
+  let t = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // Code blocks
+  t = t.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+  t = t.replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  // Bold / italic
+  t = t.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>')
+
+  const lines = t.split('\n')
+  const out = []
+  let inUl = false
+  let inOl = false
+
+  function closeList() {
+    if (inUl) { out.push('</ul>'); inUl = false }
+    if (inOl) { out.push('</ol>'); inOl = false }
+  }
+
+  for (const line of lines) {
+    const h3 = line.match(/^### (.+)/)
+    const h2 = line.match(/^## (.+)/)
+    const h1 = line.match(/^# (.+)/)
+    const ul = line.match(/^[\*\-\+] (.+)/)
+    const ol = line.match(/^(\d+)\. (.+)/)
+
+    if (h3) { closeList(); out.push(`<h3 style="margin:12px 0 6px;font-size:15px;font-weight:600">${h3[1]}</h3>`); continue }
+    if (h2) { closeList(); out.push(`<h2 style="margin:14px 0 6px;font-size:16px;font-weight:600">${h2[1]}</h2>`); continue }
+    if (h1) { closeList(); out.push(`<h1 style="margin:14px 0 8px;font-size:18px;font-weight:700">${h1[1]}</h1>`); continue }
+
+    if (ul) {
+      if (inOl) { out.push('</ol>'); inOl = false }
+      if (!inUl) { out.push('<ul style="margin:6px 0;padding-left:20px">'); inUl = true }
+      out.push(`<li style="margin:3px 0">${ul[1]}</li>`)
+      continue
+    }
+    if (ol) {
+      if (inUl) { out.push('</ul>'); inUl = false }
+      if (!inOl) { out.push('<ol style="margin:6px 0;padding-left:20px">'); inOl = true }
+      out.push(`<li style="margin:3px 0">${ol[2]}</li>`)
+      continue
+    }
+
+    closeList()
+    if (line.trim() === '') { out.push('<div style="height:8px"></div>'); continue }
+    out.push(`<p style="margin:4px 0">${line}</p>`)
+  }
+
+  closeList()
+  return out.join('')
 }
 
 function fmtTime(ts) {

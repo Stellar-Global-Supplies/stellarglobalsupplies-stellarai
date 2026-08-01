@@ -2,10 +2,15 @@ import { neon } from '@neondatabase/serverless'
 import { parseFile } from '../fileParser.js'
 import { tavilySearch } from '../tavily.js'
 
-const SYSTEM_PROMPT = `You are Stellar AI, an intelligent assistant for Stellar Global Supplies — 
-an industrial supply company. You help with procurement analysis, supplier evaluation, 
-pricing intelligence, inventory management, and data analysis. 
-Be concise, precise, and professional. Use markdown for structured responses.`
+const SYSTEM_PROMPT = `You are Stellar AI, an intelligent assistant for Stellar Global Supplies — an Indian industrial supply company. You help with procurement analysis, supplier evaluation, pricing intelligence, inventory management, and data analysis.
+
+CRITICAL RULES:
+- Always use ₹ (Indian Rupees) for all currency values, never use $ or USD
+- Be concise, precise, and professional
+- Use markdown for structured responses (headers, bullet points, bold)
+- When Ent Data is provided below, base your answer strictly on that data only
+- If no Ent Data is provided and the user asks about company-specific numbers (sales, orders, revenue etc), respond: "I don't have access to internal data for this query. Please enable the Ent Data toggle to get answers based on real company data."
+- Never invent, estimate, or hallucinate company-specific figures`
 
 function sse(writer, enc, type, data) {
   writer.write(enc.encode(`data: ${JSON.stringify({ type, ...data })}\n\n`))
@@ -60,13 +65,18 @@ export async function handleChat(req, env, ctx) {
             const q   = message.toLowerCase()
             const ctx = []
 
-            // Always load summary stats
-            const [salesSummary, purchaseSummary] = await Promise.all([
+            // Always load: overall summary + current month data
+            const currentMonth = new Date().toISOString().slice(0, 7)  // YYYY-MM
+            const [salesSummary, purchaseSummary, currentSales, currentOrders] = await Promise.all([
               sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM sales`.catch(() => []),
               sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM purchases`.catch(() => []),
+              sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total FROM sales WHERE TO_CHAR(invoice_date, 'YYYY-MM') = ${currentMonth}`.catch(() => []),
+              sql`SELECT SUM(order_count) as orders, SUM(grand_total) as total FROM orders_monthly_summary WHERE month = ${currentMonth}`.catch(() => []),
             ])
-            if (salesSummary[0]) ctx.push(`Sales summary: ${salesSummary[0].invoices} invoices, ₹${salesSummary[0].total} total (${salesSummary[0].from_date} to ${salesSummary[0].to_date})`)
-            if (purchaseSummary[0]) ctx.push(`Purchase summary: ${purchaseSummary[0].invoices} invoices, ₹${purchaseSummary[0].total} total (${purchaseSummary[0].from_date} to ${purchaseSummary[0].to_date})`)
+            if (salesSummary[0]?.total) ctx.push(`Overall sales: ${salesSummary[0].invoices} invoices, ₹${salesSummary[0].total} total (${salesSummary[0].from_date} to ${salesSummary[0].to_date})`)
+            if (purchaseSummary[0]?.total) ctx.push(`Overall purchases: ${purchaseSummary[0].invoices} invoices, ₹${purchaseSummary[0].total} total`)
+            if (currentSales[0]?.total) ctx.push(`Current month (${currentMonth}) sales: ${currentSales[0].invoices} invoices, ₹${currentSales[0].total}`)
+            if (currentOrders[0]?.orders) ctx.push(`Current month (${currentMonth}) orders: ${currentOrders[0].orders} orders, ₹${currentOrders[0].total}`)
 
             // Supplier queries
             if (q.match(/supplier|vendor|purchase|buy|bought|procur/)) {
@@ -135,11 +145,19 @@ export async function handleChat(req, env, ctx) {
               if (quoteStatus.length) ctx.push(`Quotes by status:\n${quoteStatus.map(q => `- ${q.status}: ${q.count} quotes, \u20b9${q.total}`).join('\n')}`)
             }
 
+            console.log(`Neon ctx items loaded: ${ctx.length}`)
+
             if (ctx.length) {
-              systemParts.push('\n\n## Stellar Global Supplies — Internal Business Data\n' + ctx.join('\n\n'))
+              systemParts.push('\n\n## Stellar Global Supplies — Internal Business Data (use ONLY these numbers, do not invent any figures):\n' + ctx.join('\n\n'))
+            } else {
+              // Data toggle is on but Neon returned nothing — tell the model explicitly
+              systemParts.push('\n\n## Ent Data Status\nThe internal database was queried but returned no data for this question. Tell the user the data is not yet available and suggest running the sync or checking if the Neon database has been populated.')
             }
 
-          } catch (e) { console.error('Neon error:', e.message) }
+          } catch (e) {
+            console.error('Neon error:', e.message, e.stack)
+            systemParts.push('\n\n## Ent Data Status\nThe internal database query failed. Tell the user there was a data connection error and not to rely on any figures.')
+          }
         }
       }
 
