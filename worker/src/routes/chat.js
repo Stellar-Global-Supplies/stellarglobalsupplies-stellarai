@@ -11,14 +11,17 @@ function sse(writer, enc, event, data) {
   writer.write(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
 }
 
-export async function handleChat(req) {
+async function resolveSecret(binding) {
+  return typeof binding?.get === 'function' ? await binding.get() : binding
+}
+
+export async function handleChat(req, env, ctx) {
   const { readable, writable } = new TransformStream()
   const writer = writable.getWriter()
   const enc    = new TextEncoder()
 
   ;(async () => {
     try {
-      // ── Parse request ──
       let message = '', history = [], entData = false, webSearch = false, model = 'llama-3.3-70b-versatile', fileContent = ''
       const ct = req.headers.get('content-type') || ''
 
@@ -45,58 +48,53 @@ export async function handleChat(req) {
 
       sse(writer, enc, 'status', { text: 'Launching worker…' })
 
-      // ── Build messages ──
       const systemParts = [SYSTEM_PROMPT]
 
       // Ent data: query Neon
-      if (entData && req.env.NEON_DATABASE_URL) {
-        sse(writer, enc, 'status', { text: 'Querying org data…' })
-        try {
-          const sql = neon(req.env.NEON_DATABASE_URL)
-          const rows = await sql`
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = 'public' LIMIT 20`
-          systemParts.push(`\n\n## Internal Org Data Available\nTables: ${rows.map(r => r.table_name).join(', ')}`)
-
-          // Try to fetch relevant data based on message
-          if (message.toLowerCase().match(/price|cost|rate/)) {
-            const prices = await sql`SELECT * FROM products LIMIT 50`.catch(() => [])
-            if (prices.length) systemParts.push(`\nProduct data:\n${JSON.stringify(prices, null, 2)}`)
-          }
-          if (message.toLowerCase().match(/supplier|vendor/)) {
-            const suppliers = await sql`SELECT * FROM suppliers LIMIT 50`.catch(() => [])
-            if (suppliers.length) systemParts.push(`\nSupplier data:\n${JSON.stringify(suppliers, null, 2)}`)
-          }
-          if (message.toLowerCase().match(/inventory|stock/)) {
-            const inv = await sql`SELECT * FROM inventory LIMIT 50`.catch(() => [])
-            if (inv.length) systemParts.push(`\nInventory data:\n${JSON.stringify(inv, null, 2)}`)
-          }
-        } catch (e) {
-          console.error('Neon error:', e.message)
+      if (entData) {
+        const neonUrl = await resolveSecret(env.NEON_DATABASE_URL)
+        if (neonUrl) {
+          sse(writer, enc, 'status', { text: 'Querying org data…' })
+          try {
+            const sql = neon(neonUrl)
+            const rows = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' LIMIT 20`
+            systemParts.push(`\n\n## Internal Org Data Available\nTables: ${rows.map(r => r.table_name).join(', ')}`)
+            if (message.toLowerCase().match(/price|cost|rate/)) {
+              const prices = await sql`SELECT * FROM products LIMIT 50`.catch(() => [])
+              if (prices.length) systemParts.push(`\nProduct data:\n${JSON.stringify(prices, null, 2)}`)
+            }
+            if (message.toLowerCase().match(/supplier|vendor/)) {
+              const suppliers = await sql`SELECT * FROM suppliers LIMIT 50`.catch(() => [])
+              if (suppliers.length) systemParts.push(`\nSupplier data:\n${JSON.stringify(suppliers, null, 2)}`)
+            }
+            if (message.toLowerCase().match(/inventory|stock/)) {
+              const inv = await sql`SELECT * FROM inventory LIMIT 50`.catch(() => [])
+              if (inv.length) systemParts.push(`\nInventory data:\n${JSON.stringify(inv, null, 2)}`)
+            }
+          } catch (e) { console.error('Neon error:', e.message) }
         }
       }
 
-      // File content
       if (fileContent) {
-        const trimmed = fileContent.slice(0, 80000) // ~50K tokens safe limit
-        systemParts.push(`\n\n## Uploaded File Content\n${trimmed}`)
+        systemParts.push(`\n\n## Uploaded File Content\n${fileContent.slice(0, 80000)}`)
       }
 
       // Web search via Tavily
-      if (webSearch && message && req.env.TAVILY_API_KEY) {
-        sse(writer, enc, 'status', { text: 'Searching the web…' })
-        try {
-          const results = await tavilySearch(message, req.env.TAVILY_API_KEY)
-          if (results.length) {
-            systemParts.push(`\n\n## Web Search Results\n${results.map(r => `**${r.title}**\n${r.content}\nSource: ${r.url}`).join('\n\n')}`)
-          }
-        } catch (e) {
-          console.error('Tavily error:', e.message)
+      if (webSearch && message) {
+        const tavilyKey = await resolveSecret(env.TAVILY_API_KEY)
+        if (tavilyKey) {
+          sse(writer, enc, 'status', { text: 'Searching the web…' })
+          try {
+            const results = await tavilySearch(message, tavilyKey)
+            if (results.length) {
+              systemParts.push(`\n\n## Web Search Results\n${results.map(r => `**${r.title}**\n${r.content}\nSource: ${r.url}`).join('\n\n')}`)
+            }
+          } catch (e) { console.error('Tavily error:', e.message) }
         }
       }
 
-      // Load D1 history (last 10 messages)
-      const dbHistory = await req.env.DB.prepare(
+      // Load D1 history
+      const dbHistory = await env.DB.prepare(
         `SELECT role, content FROM messages
          WHERE session_id = (
            SELECT id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1
@@ -104,19 +102,14 @@ export async function handleChat(req) {
          ORDER BY created_at DESC LIMIT 10`
       ).bind(req.user.id).all().catch(() => ({ results: [] }))
 
-      const chatHistory = (dbHistory.results || []).reverse().map(r => ({
-        role: r.role, content: r.content
-      }))
+      const chatHistory = (dbHistory.results || []).reverse().map(r => ({ role: r.role, content: r.content }))
 
       sse(writer, enc, 'status', { text: 'Thinking…' })
 
-      // ── Call Groq ──
+      const groqKey = await resolveSecret(env.GROQ_API_KEY)
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${req.env.GROQ_API_KEY}`,
-          'Content-Type':  'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
           stream: true,
@@ -139,7 +132,6 @@ export async function handleChat(req) {
 
       sse(writer, enc, 'status', { text: 'Preparing answer…' })
 
-      // ── Stream tokens ──
       const reader  = groqRes.body.getReader()
       const decoder = new TextDecoder()
       let buffer = '', fullReply = ''
@@ -150,7 +142,6 @@ export async function handleChat(req) {
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop()
-
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           const raw = line.slice(6).trim()
@@ -158,20 +149,16 @@ export async function handleChat(req) {
           try {
             const json  = JSON.parse(raw)
             const delta = json.choices?.[0]?.delta?.content
-            if (delta) {
-              fullReply += delta
-              sse(writer, enc, 'token', { delta })
-            }
+            if (delta) { fullReply += delta; sse(writer, enc, 'token', { delta }) }
           } catch {}
         }
       }
 
       sse(writer, enc, 'done', {})
-
-      // ── Persist to D1 (fire and forget) ──
-      req.ctx?.waitUntil(persistMessages(req.env.DB, req.user.id, message, fullReply, model))
+      ctx?.waitUntil(persistMessages(env.DB, req.user.id, message, fullReply, model))
 
     } catch (err) {
+      console.error('Chat error:', err.message, err.stack)
       sse(writer, enc, 'status', { text: `Error: ${err.message}` })
     } finally {
       writer.close()
@@ -189,7 +176,6 @@ export async function handleChat(req) {
 
 async function persistMessages(db, userId, userMsg, assistantMsg, model) {
   try {
-    // Get or create session
     let session = await db.prepare(
       `SELECT id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1`
     ).bind(userId).first()
@@ -197,8 +183,7 @@ async function persistMessages(db, userId, userMsg, assistantMsg, model) {
     if (!session) {
       const sid = crypto.randomUUID()
       const title = userMsg.slice(0, 50) || 'New chat'
-      await db.prepare(`INSERT INTO sessions (id, user_id, title) VALUES (?, ?, ?)`)
-        .bind(sid, userId, title).run()
+      await db.prepare(`INSERT INTO sessions (id, user_id, title) VALUES (?, ?, ?)`).bind(sid, userId, title).run()
       session = { id: sid }
     }
 
@@ -207,10 +192,7 @@ async function persistMessages(db, userId, userMsg, assistantMsg, model) {
         .bind(crypto.randomUUID(), session.id, userMsg, model),
       db.prepare(`INSERT INTO messages (id, session_id, role, content, model) VALUES (?, ?, 'assistant', ?, ?)`)
         .bind(crypto.randomUUID(), session.id, assistantMsg, model),
-      db.prepare(`UPDATE sessions SET updated_at = datetime('now') WHERE id = ?`)
-        .bind(session.id),
+      db.prepare(`UPDATE sessions SET updated_at = datetime('now') WHERE id = ?`).bind(session.id),
     ])
-  } catch (e) {
-    console.error('Persist error:', e.message)
-  }
+  } catch (e) { console.error('Persist error:', e.message) }
 }

@@ -1,9 +1,14 @@
 import { tavilySearch } from '../tavily.js'
 
-export async function handleSearch(req) {
+async function resolveSecret(binding) {
+  return typeof binding?.get === 'function' ? await binding.get() : binding
+}
+
+export async function handleSearch(req, env) {
   const { query } = await req.json()
   if (!query) return new Response(JSON.stringify({ error: 'query required' }), { status: 400 })
 
-  const results = await tavilySearch(query, req.env.TAVILY_API_KEY)
+  const tavilyKey = await resolveSecret(env.TAVILY_API_KEY)
+  const results = await tavilySearch(query, tavilyKey)
   return Response.json({ results })
 }

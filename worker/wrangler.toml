@@ -4,6 +4,13 @@ compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+[observability]
+enabled = true
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
 # D1 Database binding
 [[d1_databases]]
 binding       = "DB"
@@ -44,10 +51,3 @@ store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 binding     = "ALLOWED_ORIGIN"
 secret_name = "ALLOWED_ORIGIN"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
-[observability]
-enabled = true
-
-[observability.logs]
-enabled = false
-invocation_logs = true

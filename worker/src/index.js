@@ -1,10 +1,10 @@
 import { AutoRouter, cors } from 'itty-router'
-import { handleChat }     from './routes/chat.js'
-import { handleImagine }  from './routes/imagine.js'
-import { handleHistory }  from './routes/history.js'
-import { handleSearch }   from './routes/search.js'
+import { handleChat }                  from './routes/chat.js'
+import { handleImagine }               from './routes/imagine.js'
+import { handleHistory }               from './routes/history.js'
+import { handleSearch }                from './routes/search.js'
 import { handleRegister, handleLogin } from './routes/auth.js'
-import { verifyJWT }      from './auth.js'
+import { verifyJWT }                   from './auth.js'
 
 const ALLOWED_ORIGINS = [
   'https://stellarglobalsupplies-stellarai.pages.dev',
@@ -22,23 +22,22 @@ const { preflight, corsify } = cors({
 const router = AutoRouter({ before: [preflight], finally: [corsify] })
 
 // ── Auth middleware ──
-async function withAuth(req) {
+// itty-router passes (req, env, ctx) to every handler matching router.fetch(req, env, ctx)
+async function withAuth(req, env) {
   const auth  = req.headers.get('Authorization') || ''
   const token = auth.replace('Bearer ', '').trim()
   if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
-  const secret = typeof req.env.JWT_SECRET?.get === 'function'
-    ? await req.env.JWT_SECRET.get()
-    : req.env.JWT_SECRET
+  const secret = typeof env.JWT_SECRET?.get === 'function'
+    ? await env.JWT_SECRET.get()
+    : env.JWT_SECRET
   const user = await verifyJWT(token, secret)
   if (!user) return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401 })
   req.user = user
 }
 
-// ── Public auth routes ──
+// ── Routes ──
 router.post('/api/auth/register', handleRegister)
 router.post('/api/auth/login',    handleLogin)
-
-// ── Protected routes ──
 router.post('/api/chat',    withAuth, handleChat)
 router.post('/api/imagine', withAuth, handleImagine)
 router.get ('/api/history', withAuth, handleHistory)
@@ -47,18 +46,25 @@ router.get ('/api/health',  () => new Response(JSON.stringify({ ok: true, ts: Da
   headers: { 'Content-Type': 'application/json' }
 }))
 
-// ── Scheduled cron: 6-month history cleanup ──
+// ── Scheduled cron ──
 async function scheduled(event, env) {
-  await env.DB.prepare(
-    `DELETE FROM messages WHERE created_at < datetime('now', '-6 months')`
-  ).run()
-  await env.DB.prepare(
-    `DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)`
-  ).run()
+  await env.DB.prepare(`DELETE FROM messages WHERE created_at < datetime('now', '-6 months')`).run()
+  await env.DB.prepare(`DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)`).run()
   console.log('Cron cleanup done:', new Date().toISOString())
 }
 
 export default {
-  fetch:     (req, env, ctx) => router.fetch(req, { ...req, env, ctx }),
+  fetch: async (req, env, ctx) => {
+    try {
+      // Pass env and ctx as extra args — itty-router forwards them to every handler as (req, env, ctx)
+      return await router.fetch(req, env, ctx)
+    } catch (err) {
+      console.error('Worker error:', err?.message, err?.stack)
+      return new Response(JSON.stringify({ error: 'Internal server error', detail: err?.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ALLOWED_ORIGINS[0] }
+      })
+    }
+  },
   scheduled: (event, env, ctx) => ctx.waitUntil(scheduled(event, env)),
 }
