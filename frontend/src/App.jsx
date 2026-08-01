@@ -28,6 +28,7 @@ export default function App() {
   const [messages, setMessages]     = useState([])
   const [isTyping, setIsTyping]     = useState(false)
   const [history, setHistory]       = useState([])
+  const [sessionId, setSessionId]   = useState(null)
   const chatRef                     = useRef(null)
 
   const token = auth?.token || ''
@@ -41,12 +42,13 @@ export default function App() {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.sessions) {
-          setHistory(data.sessions.map(s => ({
+          const sessions = data.sessions.map((s, i) => ({
             id: s.id,
             title: s.title || 'Untitled chat',
             active: false,
             ts: s.updated_at,
-          })))
+          }))
+          setHistory(sessions)
         }
       })
       .catch(() => {})
@@ -89,14 +91,7 @@ export default function App() {
 
     addMessage({ role: 'user', text, file: file?.name, ts: Date.now() })
 
-    if (text) {
-      const title = text.length > 36 ? text.slice(0, 36) + '…' : text
-      setHistory(prev => {
-        const hasActive = prev.some(h => h.active)
-        if (hasActive) return prev  // continue existing session, don't add new entry
-        return [{ id: Date.now(), title, active: true }, ...prev.map(h => ({ ...h, active: false }))]
-      })
-    }
+    // Session ID and history entry are set after worker responds with real session ID
 
     setIsTyping(true)
 
@@ -135,7 +130,7 @@ export default function App() {
         body = fd
       } else {
         headers['Content-Type'] = 'application/json'
-        body = JSON.stringify({ message: text, model, entData, webSearch, history: messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text })) })
+        body = JSON.stringify({ message: text, model, entData, webSearch, sessionId, history: messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text })) })
       }
 
       const res = await fetch(`${WORKER_URL}/api/chat`, { method: 'POST', headers, body })
@@ -165,7 +160,19 @@ export default function App() {
             const evt = JSON.parse(raw)
             if (evt.type === 'status')      updateLastAssistant(m => ({ ...m, status: evt.text }))
             else if (evt.type === 'token')  updateLastAssistant(m => ({ ...m, status: null, text: (m.text || '') + evt.delta }))
-            else if (evt.type === 'done')   updateLastAssistant(m => ({ ...m, status: null }))
+            else if (evt.type === 'done') {
+              updateLastAssistant(m => ({ ...m, status: null }))
+              if (evt.sessionId && !sessionId) {
+                const sid = evt.sessionId
+                setSessionId(sid)
+                setHistory(prev => {
+                  const exists = prev.find(h => h.id === sid)
+                  if (exists) return prev.map(h => ({ ...h, active: h.id === sid }))
+                  const title = text.length > 36 ? text.slice(0, 36) + '...' : text
+                  return [{ id: sid, title, active: true }, ...prev.map(h => ({ ...h, active: false }))]
+                })
+              }
+            }
           } catch {}
         }
       }
@@ -187,8 +194,11 @@ export default function App() {
         user={auth.user}
         token={token}
         onLogout={handleLogout}
-        onNewChat={() => setMessages([])}
-        onSelectHistory={id => setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))}
+        onNewChat={() => { setMessages([]); setSessionId(null) }}
+        onSelectHistory={id => {
+          setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))
+          setSessionId(id)
+        }}
         onDeleteHistory={id => setHistory(prev => prev.filter(h => h.id !== id))}
       />
       <main className="main">

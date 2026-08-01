@@ -27,7 +27,7 @@ export async function handleChat(req, env, ctx) {
 
   ;(async () => {
     try {
-      let message = '', history = [], entData = false, webSearch = false, model = 'llama-3.3-70b-versatile', fileContent = ''
+      let message = '', history = [], entData = false, webSearch = false, model = 'llama-3.3-70b-versatile', fileContent = '', sessionId = null
       const ct = req.headers.get('content-type') || ''
 
       if (ct.includes('multipart/form-data')) {
@@ -37,6 +37,7 @@ export async function handleChat(req, env, ctx) {
         entData    = form.get('entData') === 'true'
         webSearch  = form.get('webSearch') === 'true'
         history    = JSON.parse(form.get('history') || '[]')
+        sessionId  = form.get('sessionId') || null
         const file = form.get('file')
         if (file) {
           sse(writer, enc, 'status', { text: 'Parsing file…' })
@@ -49,6 +50,7 @@ export async function handleChat(req, env, ctx) {
         entData   = !!body.entData
         webSearch = !!body.webSearch
         history   = body.history || []
+        sessionId = body.sessionId || null
       }
 
       sse(writer, enc, 'status', { text: 'Launching worker…' })
@@ -240,8 +242,8 @@ export async function handleChat(req, env, ctx) {
         }
       }
 
-      sse(writer, enc, 'done', {})
-      ctx?.waitUntil(persistMessages(env.DB, req.user.id, message, fullReply, model))
+      const realSessionId = await persistMessages(env.DB, req.user.id, message, fullReply, model, sessionId)
+      sse(writer, enc, 'done', { sessionId: realSessionId })
 
     } catch (err) {
       console.error('Chat error:', err.message, err.stack)
@@ -260,16 +262,24 @@ export async function handleChat(req, env, ctx) {
   })
 }
 
-async function persistMessages(db, userId, userMsg, assistantMsg, model) {
+async function persistMessages(db, userId, userMsg, assistantMsg, model, sessionId = null) {
   try {
-    let session = await db.prepare(
-      `SELECT id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1`
-    ).bind(userId).first()
+    let session = null
 
+    // Use provided sessionId if valid and belongs to this user
+    if (sessionId) {
+      session = await db.prepare(
+        `SELECT id FROM sessions WHERE id = ? AND user_id = ?`
+      ).bind(sessionId, userId).first()
+    }
+
+    // Create new session if none found
     if (!session) {
-      const sid = crypto.randomUUID()
+      const sid   = crypto.randomUUID()
       const title = userMsg.slice(0, 50) || 'New chat'
-      await db.prepare(`INSERT INTO sessions (id, user_id, title) VALUES (?, ?, ?)`).bind(sid, userId, title).run()
+      await db.prepare(
+        `INSERT INTO sessions (id, user_id, title) VALUES (?, ?, ?)`
+      ).bind(sid, userId, title).run()
       session = { id: sid }
     }
 
@@ -278,7 +288,13 @@ async function persistMessages(db, userId, userMsg, assistantMsg, model) {
         .bind(crypto.randomUUID(), session.id, userMsg, model),
       db.prepare(`INSERT INTO messages (id, session_id, role, content, model) VALUES (?, ?, 'assistant', ?, ?)`)
         .bind(crypto.randomUUID(), session.id, assistantMsg, model),
-      db.prepare(`UPDATE sessions SET updated_at = datetime('now') WHERE id = ?`).bind(session.id),
+      db.prepare(`UPDATE sessions SET updated_at = datetime('now') WHERE id = ?`)
+        .bind(session.id),
     ])
-  } catch (e) { console.error('Persist error:', e.message) }
+
+    return session.id
+  } catch (e) {
+    console.error('Persist error:', e.message)
+    return null
+  }
 }
