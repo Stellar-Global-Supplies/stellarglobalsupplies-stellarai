@@ -93,17 +93,6 @@ export async function handleChat(req, env, ctx) {
         }
       }
 
-      // Load D1 history
-      const dbHistory = await env.DB.prepare(
-        `SELECT role, content FROM messages
-         WHERE session_id = (
-           SELECT id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1
-         )
-         ORDER BY created_at DESC LIMIT 10`
-      ).bind(req.user.id).all().catch(() => ({ results: [] }))
-
-      const chatHistory = (dbHistory.results || []).reverse().map(r => ({ role: r.role, content: r.content }))
-
       sse(writer, enc, 'status', { text: 'Thinking…' })
 
       const groqKey = await resolveSecret(env.GROQ_API_KEY)
@@ -116,8 +105,7 @@ export async function handleChat(req, env, ctx) {
           max_tokens: 4096,
           messages: [
             { role: 'system', content: systemParts.join('') },
-            ...chatHistory,
-            ...history.slice(-4),
+            ...history.slice(-8),
             { role: 'user', content: message || 'Analyse the uploaded data.' },
           ],
         }),

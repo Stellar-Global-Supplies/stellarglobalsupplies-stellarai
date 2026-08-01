@@ -91,7 +91,11 @@ export default function App() {
 
     if (text) {
       const title = text.length > 36 ? text.slice(0, 36) + '…' : text
-      setHistory(prev => [{ id: Date.now(), title, active: true }, ...prev.map(h => ({ ...h, active: false }))])
+      setHistory(prev => {
+        const hasActive = prev.some(h => h.active)
+        if (hasActive) return prev  // continue existing session, don't add new entry
+        return [{ id: Date.now(), title, active: true }, ...prev.map(h => ({ ...h, active: false }))]
+      })
     }
 
     setIsTyping(true)
@@ -127,11 +131,11 @@ export default function App() {
         fd.append('model', model)
         fd.append('entData', entData)
         fd.append('webSearch', webSearch)
-        fd.append('history', JSON.stringify(messages.slice(-10)))
+        fd.append('history', JSON.stringify(messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text }))))
         body = fd
       } else {
         headers['Content-Type'] = 'application/json'
-        body = JSON.stringify({ message: text, model, entData, webSearch, history: messages.slice(-10) })
+        body = JSON.stringify({ message: text, model, entData, webSearch, history: messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text })) })
       }
 
       const res = await fetch(`${WORKER_URL}/api/chat`, { method: 'POST', headers, body })
