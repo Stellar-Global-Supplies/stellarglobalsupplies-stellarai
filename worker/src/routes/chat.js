@@ -67,11 +67,23 @@ export async function handleChat(req, env, ctx) {
 
             // Always load: overall summary + current month data
             const currentMonth = new Date().toISOString().slice(0, 7)  // YYYY-MM
+
+            const safeQuery = async (label, query) => {
+              try {
+                const result = await query
+                console.log(`Neon [${label}]:`, JSON.stringify(result?.slice?.(0,2) ?? result))
+                return result
+              } catch (e) {
+                console.error(`Neon [${label}] ERROR:`, e.message)
+                return []
+              }
+            }
+
             const [salesSummary, purchaseSummary, currentSales, currentOrders] = await Promise.all([
-              sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM sales`.catch(() => []),
-              sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM purchases`.catch(() => []),
-              sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total FROM sales WHERE TO_CHAR(invoice_date, 'YYYY-MM') = ${currentMonth}`.catch(() => []),
-              sql`SELECT SUM(order_count) as orders, SUM(grand_total) as total FROM orders_monthly_summary WHERE month = ${currentMonth}`.catch(() => []),
+              safeQuery('sales_summary', sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM sales`),
+              safeQuery('purchases_summary', sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM purchases`),
+              safeQuery('current_sales', sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total FROM sales WHERE TO_CHAR(invoice_date, 'YYYY-MM') = ${currentMonth}`),
+              safeQuery('current_orders', sql`SELECT SUM(order_count) as orders, SUM(grand_total) as total FROM orders_monthly_summary WHERE month = ${currentMonth}`),
             ])
             if (salesSummary[0]?.total) ctx.push(`Overall sales: ${salesSummary[0].invoices} invoices, ₹${salesSummary[0].total} total (${salesSummary[0].from_date} to ${salesSummary[0].to_date})`)
             if (purchaseSummary[0]?.total) ctx.push(`Overall purchases: ${purchaseSummary[0].invoices} invoices, ₹${purchaseSummary[0].total} total`)
@@ -81,8 +93,8 @@ export async function handleChat(req, env, ctx) {
             // Supplier queries
             if (q.match(/supplier|vendor|purchase|buy|bought|procur/)) {
               const [suppliers, topPurchase] = await Promise.all([
-                sql`SELECT supplier_name, gstin FROM suppliers ORDER BY supplier_name LIMIT 50`.catch(() => []),
-                sql`SELECT supplier_name, COUNT(*) as invoices, SUM(total_amount) as total FROM purchases GROUP BY supplier_name ORDER BY total DESC LIMIT 20`.catch(() => []),
+                safeQuery('select_supplier_name,_gstin_fr', sql`SELECT supplier_name, gstin FROM suppliers ORDER BY supplier_name LIMIT 50`),
+                safeQuery('select_supplier_name,_count(*)', sql`SELECT supplier_name, COUNT(*) as invoices, SUM(total_amount) as total FROM purchases GROUP BY supplier_name ORDER BY total DESC LIMIT 20`),
               ])
               if (suppliers.length) ctx.push(`Suppliers (${suppliers.length}):\n${suppliers.map(s => `- ${s.supplier_name}${s.gstin ? ' (GST: '+s.gstin+')' : ''}`).join('\n')}`)
               if (topPurchase.length) ctx.push(`Top suppliers by purchase value:\n${topPurchase.map(s => `- ${s.supplier_name}: ₹${s.total} (${s.invoices} invoices)`).join('\n')}`)
@@ -91,8 +103,8 @@ export async function handleChat(req, env, ctx) {
             // Customer / sales queries
             if (q.match(/customer|client|sale|sold|revenue|invoice/)) {
               const [customers, topSales] = await Promise.all([
-                sql`SELECT customer_name, gstin FROM customers ORDER BY customer_name LIMIT 50`.catch(() => []),
-                sql`SELECT customer_name, COUNT(*) as invoices, SUM(total_amount) as total FROM sales GROUP BY customer_name ORDER BY total DESC LIMIT 20`.catch(() => []),
+                safeQuery('select_customer_name,_gstin_fr', sql`SELECT customer_name, gstin FROM customers ORDER BY customer_name LIMIT 50`),
+                safeQuery('select_customer_name,_count(*)', sql`SELECT customer_name, COUNT(*) as invoices, SUM(total_amount) as total FROM sales GROUP BY customer_name ORDER BY total DESC LIMIT 20`),
               ])
               if (customers.length) ctx.push(`Customers (${customers.length}):\n${customers.map(c => `- ${c.customer_name}${c.gstin ? ' (GST: '+c.gstin+')' : ''}`).join('\n')}`)
               if (topSales.length) ctx.push(`Top customers by sales value:\n${topSales.map(c => `- ${c.customer_name}: ₹${c.total} (${c.invoices} invoices)`).join('\n')}`)
@@ -101,8 +113,8 @@ export async function handleChat(req, env, ctx) {
             // Product / item / SKU queries
             if (q.match(/product|item|material|sku|stock|quantity|qty/)) {
               const [skus, topItems] = await Promise.all([
-                sql`SELECT sku, material_type, hsn_sac FROM top_sku ORDER BY sku LIMIT 100`.catch(() => []),
-                sql`SELECT item_name, material_type, SUM(quantity) as total_qty, SUM(total_amount) as total_value FROM sales_items GROUP BY item_name, material_type ORDER BY total_value DESC LIMIT 20`.catch(() => []),
+                safeQuery('select_sku,_material_type,_hsn', sql`SELECT sku, material_type, hsn_sac FROM top_sku ORDER BY sku LIMIT 100`),
+                safeQuery('select_item_name,_material_typ', sql`SELECT item_name, material_type, SUM(quantity) as total_qty, SUM(total_amount) as total_value FROM sales_items GROUP BY item_name, material_type ORDER BY total_value DESC LIMIT 20`),
               ])
               if (skus.length) ctx.push(`Product catalogue (${skus.length} SKUs):\n${skus.map(s => `- ${s.sku}${s.material_type ? ' ['+s.material_type+']' : ''}${s.hsn_sac ? ' HSN:'+s.hsn_sac : ''}`).join('\n')}`)
               if (topItems.length) ctx.push(`Top items by sales value:\n${topItems.map(i => `- ${i.item_name}: qty ${i.total_qty}, ₹${i.total_value}`).join('\n')}`)
@@ -110,26 +122,26 @@ export async function handleChat(req, env, ctx) {
 
             // GST / tax queries
             if (q.match(/gst|tax|cgst|sgst|igst/)) {
-              const gstSummary = await sql`
+              const gstSummary = await safeQuery('select_gst_rate,_sum(gst_amoun', sql`
                 SELECT gst_rate, SUM(gst_amount) as total_gst, SUM(base_amount) as base, COUNT(*) as items
-                FROM sales_items GROUP BY gst_rate ORDER BY gst_rate`.catch(() => [])
+                FROM sales_items GROUP BY gst_rate ORDER BY gst_rate`)
               if (gstSummary.length) ctx.push(`GST breakdown (sales):\n${gstSummary.map(g => `- ${g.gst_rate}% rate: ₹${g.total_gst} GST on ₹${g.base} base (${g.items} items)`).join('\n')}`)
             }
 
             // Date / trend queries
             if (q.match(/month|year|trend|growth|2024|2025|quarter|period/)) {
-              const monthly = await sql`
+              const monthly = await safeQuery('select_to_char(invoice_date,_', sql`
                 SELECT TO_CHAR(invoice_date, 'YYYY-MM') as month, SUM(total_amount) as sales
                 FROM sales WHERE invoice_date >= NOW() - INTERVAL '12 months'
-                GROUP BY month ORDER BY month`.catch(() => [])
+                GROUP BY month ORDER BY month`)
               if (monthly.length) ctx.push(`Monthly sales (last 12 months):\n${monthly.map(m => `- ${m.month}: ₹${m.sales}`).join('\n')}`)
             }
 
             // Order summary queries
             if (q.match(/order|dispatch|deliver|execut|fulfill/)) {
               const [orderSummary, orderStatus] = await Promise.all([
-                sql`SELECT month, SUM(order_count) as orders, SUM(grand_total) as total FROM orders_monthly_summary GROUP BY month ORDER BY month DESC LIMIT 12`.catch(() => []),
-                sql`SELECT status, payment_status, SUM(order_count) as count, SUM(grand_total) as total FROM orders_monthly_summary GROUP BY status, payment_status ORDER BY total DESC`.catch(() => []),
+                safeQuery('select_month,_sum(order_count)', sql`SELECT month, SUM(order_count) as orders, SUM(grand_total) as total FROM orders_monthly_summary GROUP BY month ORDER BY month DESC LIMIT 12`),
+                safeQuery('select_status,_payment_status,', sql`SELECT status, payment_status, SUM(order_count) as count, SUM(grand_total) as total FROM orders_monthly_summary GROUP BY status, payment_status ORDER BY total DESC`),
               ])
               if (orderSummary.length) ctx.push(`Monthly orders (last 12 months):\n${orderSummary.map(o => `- ${o.month}: ${o.orders} orders, \u20b9${o.total}`).join('\n')}`)
               if (orderStatus.length) ctx.push(`Orders by status:\n${orderStatus.map(o => `- ${o.status} / ${o.payment_status}: ${o.count} orders, \u20b9${o.total}`).join('\n')}`)
@@ -138,8 +150,8 @@ export async function handleChat(req, env, ctx) {
             // Quote summary queries
             if (q.match(/quote|quotation|proposal|bid|prospect/)) {
               const [quoteSummary, quoteStatus] = await Promise.all([
-                sql`SELECT month, SUM(quote_count) as quotes, SUM(total_value) as total, AVG(avg_quote_value) as avg FROM quotes_monthly_summary GROUP BY month ORDER BY month DESC LIMIT 12`.catch(() => []),
-                sql`SELECT status, SUM(quote_count) as count, SUM(total_value) as total FROM quotes_monthly_summary GROUP BY status ORDER BY total DESC`.catch(() => []),
+                safeQuery('select_month,_sum(quote_count)', sql`SELECT month, SUM(quote_count) as quotes, SUM(total_value) as total, AVG(avg_quote_value) as avg FROM quotes_monthly_summary GROUP BY month ORDER BY month DESC LIMIT 12`),
+                safeQuery('select_status,_sum(quote_count', sql`SELECT status, SUM(quote_count) as count, SUM(total_value) as total FROM quotes_monthly_summary GROUP BY status ORDER BY total DESC`),
               ])
               if (quoteSummary.length) ctx.push(`Monthly quotes (last 12 months):\n${quoteSummary.map(q => `- ${q.month}: ${q.quotes} quotes, \u20b9${q.total} total, \u20b9${Math.round(q.avg)} avg`).join('\n')}`)
               if (quoteStatus.length) ctx.push(`Quotes by status:\n${quoteStatus.map(q => `- ${q.status}: ${q.count} quotes, \u20b9${q.total}`).join('\n')}`)
