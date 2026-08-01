@@ -6,17 +6,24 @@ import { handleSearch }   from './routes/search.js'
 import { handleRegister, handleLogin } from './routes/auth.js'
 import { verifyJWT }      from './auth.js'
 
+const ALLOWED_ORIGINS = [
+  'https://stellarglobalsupplies-stellarai.pages.dev',
+  'http://localhost:5173',
+  'http://localhost:4173',
+]
+
 const { preflight, corsify } = cors({
-  origin: (origin, req) => req.env?.ALLOWED_ORIGIN || '*',
+  origin: (origin) => ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400,
 })
 
 const router = AutoRouter({ before: [preflight], finally: [corsify] })
 
 // ── Auth middleware ──
 async function withAuth(req) {
-  const auth = req.headers.get('Authorization') || ''
+  const auth  = req.headers.get('Authorization') || ''
   const token = auth.replace('Bearer ', '').trim()
   if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
   const secret = typeof req.env.JWT_SECRET?.get === 'function'
