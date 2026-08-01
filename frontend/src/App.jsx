@@ -20,7 +20,9 @@ export default function App() {
   const stored = getStoredAuth()
 
   const [auth, setAuth]             = useState(stored)          // { token, user } | null
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen]       = useState(true)
+  const [mobileSidebarOpen, setMobileSidebar] = useState(false)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
   const [model, setModel]           = useState('llama-3.3-70b-versatile')
   const [entData, setEntData]       = useState(false)
   const [imgGen, setImgGen]         = useState(false)
@@ -194,13 +196,19 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* Mobile overlay */}
+      <div
+        className={`sidebar-overlay${mobileSidebarOpen ? ' show' : ''}`}
+        onClick={() => setMobileSidebar(false)}
+      />
       <Sidebar
         open={sidebarOpen}
+        mobileOpen={mobileSidebarOpen}
         history={history}
         user={auth.user}
         token={token}
         onLogout={handleLogout}
-        onNewChat={() => { setMessages([]); setSessionId(null) }}
+        onNewChat={() => { setMessages([]); setSessionId(null); setMobileSidebar(false) }}
         onSelectHistory={async id => {
           setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))
           setSessionId(id)
@@ -225,7 +233,10 @@ export default function App() {
       <main className="main">
         <Topbar
           sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(o => !o)}
+          onToggleSidebar={() => {
+            if (window.innerWidth <= 768) setMobileSidebar(o => !o)
+            else setSidebarOpen(o => !o)
+          }}
           model={model}
           onModelChange={setModel}
           entData={entData}

@@ -66,7 +66,7 @@ function HistoryItem({ item, onSelect, onDelete }) {
   )
 }
 
-export default function Sidebar({ open, history, user, token, onLogout, onNewChat, onSelectHistory, onDeleteHistory }) {
+export default function Sidebar({ open, mobileOpen, history, user, token, onLogout, onNewChat, onSelectHistory, onDeleteHistory }) {
   const [search, setSearch] = useState('')
 
   const filtered = history.filter(h => h.title.toLowerCase().includes(search.toLowerCase()))
@@ -90,7 +90,7 @@ export default function Sidebar({ open, history, user, token, onLogout, onNewCha
   }
 
   return (
-    <aside className={`sidebar${open ? '' : ' collapsed'}`}>
+    <aside className={`sidebar${open ? '' : ' collapsed'}${mobileOpen ? ' mobile-open' : ''}`}>
       <div className="sidebar-top">
         <div className="sidebar-header">
           <a className="logo-mark" href="#">
