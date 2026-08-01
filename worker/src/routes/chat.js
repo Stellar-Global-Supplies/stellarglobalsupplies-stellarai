@@ -50,27 +50,95 @@ export async function handleChat(req, env, ctx) {
 
       const systemParts = [SYSTEM_PROMPT]
 
-      // Ent data: query Neon
+      // Ent data: query Neon read-only analytics DB
       if (entData) {
         const neonUrl = await resolveSecret(env.NEON_DATABASE_URL)
         if (neonUrl) {
           sse(writer, enc, 'status', { text: 'Querying org data…' })
           try {
             const sql = neon(neonUrl)
-            const rows = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' LIMIT 20`
-            systemParts.push(`\n\n## Internal Org Data Available\nTables: ${rows.map(r => r.table_name).join(', ')}`)
-            if (message.toLowerCase().match(/price|cost|rate/)) {
-              const prices = await sql`SELECT * FROM products LIMIT 50`.catch(() => [])
-              if (prices.length) systemParts.push(`\nProduct data:\n${JSON.stringify(prices, null, 2)}`)
+            const q   = message.toLowerCase()
+            const ctx = []
+
+            // Always load summary stats
+            const [salesSummary, purchaseSummary] = await Promise.all([
+              sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM sales`.catch(() => []),
+              sql`SELECT COUNT(*) as invoices, SUM(total_amount) as total, MIN(invoice_date) as from_date, MAX(invoice_date) as to_date FROM purchases`.catch(() => []),
+            ])
+            if (salesSummary[0]) ctx.push(`Sales summary: ${salesSummary[0].invoices} invoices, ₹${salesSummary[0].total} total (${salesSummary[0].from_date} to ${salesSummary[0].to_date})`)
+            if (purchaseSummary[0]) ctx.push(`Purchase summary: ${purchaseSummary[0].invoices} invoices, ₹${purchaseSummary[0].total} total (${purchaseSummary[0].from_date} to ${purchaseSummary[0].to_date})`)
+
+            // Supplier queries
+            if (q.match(/supplier|vendor|purchase|buy|bought|procur/)) {
+              const [suppliers, topPurchase] = await Promise.all([
+                sql`SELECT supplier_name, gstin FROM suppliers ORDER BY supplier_name LIMIT 50`.catch(() => []),
+                sql`SELECT supplier_name, COUNT(*) as invoices, SUM(total_amount) as total FROM purchases GROUP BY supplier_name ORDER BY total DESC LIMIT 20`.catch(() => []),
+              ])
+              if (suppliers.length) ctx.push(`Suppliers (${suppliers.length}):\n${suppliers.map(s => `- ${s.supplier_name}${s.gstin ? ' (GST: '+s.gstin+')' : ''}`).join('\n')}`)
+              if (topPurchase.length) ctx.push(`Top suppliers by purchase value:\n${topPurchase.map(s => `- ${s.supplier_name}: ₹${s.total} (${s.invoices} invoices)`).join('\n')}`)
             }
-            if (message.toLowerCase().match(/supplier|vendor/)) {
-              const suppliers = await sql`SELECT * FROM suppliers LIMIT 50`.catch(() => [])
-              if (suppliers.length) systemParts.push(`\nSupplier data:\n${JSON.stringify(suppliers, null, 2)}`)
+
+            // Customer / sales queries
+            if (q.match(/customer|client|sale|sold|revenue|invoice/)) {
+              const [customers, topSales] = await Promise.all([
+                sql`SELECT customer_name, gstin FROM customers ORDER BY customer_name LIMIT 50`.catch(() => []),
+                sql`SELECT customer_name, COUNT(*) as invoices, SUM(total_amount) as total FROM sales GROUP BY customer_name ORDER BY total DESC LIMIT 20`.catch(() => []),
+              ])
+              if (customers.length) ctx.push(`Customers (${customers.length}):\n${customers.map(c => `- ${c.customer_name}${c.gstin ? ' (GST: '+c.gstin+')' : ''}`).join('\n')}`)
+              if (topSales.length) ctx.push(`Top customers by sales value:\n${topSales.map(c => `- ${c.customer_name}: ₹${c.total} (${c.invoices} invoices)`).join('\n')}`)
             }
-            if (message.toLowerCase().match(/inventory|stock/)) {
-              const inv = await sql`SELECT * FROM inventory LIMIT 50`.catch(() => [])
-              if (inv.length) systemParts.push(`\nInventory data:\n${JSON.stringify(inv, null, 2)}`)
+
+            // Product / item / SKU queries
+            if (q.match(/product|item|material|sku|stock|quantity|qty/)) {
+              const [skus, topItems] = await Promise.all([
+                sql`SELECT sku, material_type, hsn_sac FROM top_sku ORDER BY sku LIMIT 100`.catch(() => []),
+                sql`SELECT item_name, material_type, SUM(quantity) as total_qty, SUM(total_amount) as total_value FROM sales_items GROUP BY item_name, material_type ORDER BY total_value DESC LIMIT 20`.catch(() => []),
+              ])
+              if (skus.length) ctx.push(`Product catalogue (${skus.length} SKUs):\n${skus.map(s => `- ${s.sku}${s.material_type ? ' ['+s.material_type+']' : ''}${s.hsn_sac ? ' HSN:'+s.hsn_sac : ''}`).join('\n')}`)
+              if (topItems.length) ctx.push(`Top items by sales value:\n${topItems.map(i => `- ${i.item_name}: qty ${i.total_qty}, ₹${i.total_value}`).join('\n')}`)
             }
+
+            // GST / tax queries
+            if (q.match(/gst|tax|cgst|sgst|igst/)) {
+              const gstSummary = await sql`
+                SELECT gst_rate, SUM(gst_amount) as total_gst, SUM(base_amount) as base, COUNT(*) as items
+                FROM sales_items GROUP BY gst_rate ORDER BY gst_rate`.catch(() => [])
+              if (gstSummary.length) ctx.push(`GST breakdown (sales):\n${gstSummary.map(g => `- ${g.gst_rate}% rate: ₹${g.total_gst} GST on ₹${g.base} base (${g.items} items)`).join('\n')}`)
+            }
+
+            // Date / trend queries
+            if (q.match(/month|year|trend|growth|2024|2025|quarter|period/)) {
+              const monthly = await sql`
+                SELECT TO_CHAR(invoice_date, 'YYYY-MM') as month, SUM(total_amount) as sales
+                FROM sales WHERE invoice_date >= NOW() - INTERVAL '12 months'
+                GROUP BY month ORDER BY month`.catch(() => [])
+              if (monthly.length) ctx.push(`Monthly sales (last 12 months):\n${monthly.map(m => `- ${m.month}: ₹${m.sales}`).join('\n')}`)
+            }
+
+            // Order summary queries
+            if (q.match(/order|dispatch|deliver|execut|fulfill/)) {
+              const [orderSummary, orderStatus] = await Promise.all([
+                sql`SELECT month, SUM(order_count) as orders, SUM(grand_total) as total FROM orders_monthly_summary GROUP BY month ORDER BY month DESC LIMIT 12`.catch(() => []),
+                sql`SELECT status, payment_status, SUM(order_count) as count, SUM(grand_total) as total FROM orders_monthly_summary GROUP BY status, payment_status ORDER BY total DESC`.catch(() => []),
+              ])
+              if (orderSummary.length) ctx.push(`Monthly orders (last 12 months):\n${orderSummary.map(o => `- ${o.month}: ${o.orders} orders, \u20b9${o.total}`).join('\n')}`)
+              if (orderStatus.length) ctx.push(`Orders by status:\n${orderStatus.map(o => `- ${o.status} / ${o.payment_status}: ${o.count} orders, \u20b9${o.total}`).join('\n')}`)
+            }
+
+            // Quote summary queries
+            if (q.match(/quote|quotation|proposal|bid|prospect/)) {
+              const [quoteSummary, quoteStatus] = await Promise.all([
+                sql`SELECT month, SUM(quote_count) as quotes, SUM(total_value) as total, AVG(avg_quote_value) as avg FROM quotes_monthly_summary GROUP BY month ORDER BY month DESC LIMIT 12`.catch(() => []),
+                sql`SELECT status, SUM(quote_count) as count, SUM(total_value) as total FROM quotes_monthly_summary GROUP BY status ORDER BY total DESC`.catch(() => []),
+              ])
+              if (quoteSummary.length) ctx.push(`Monthly quotes (last 12 months):\n${quoteSummary.map(q => `- ${q.month}: ${q.quotes} quotes, \u20b9${q.total} total, \u20b9${Math.round(q.avg)} avg`).join('\n')}`)
+              if (quoteStatus.length) ctx.push(`Quotes by status:\n${quoteStatus.map(q => `- ${q.status}: ${q.count} quotes, \u20b9${q.total}`).join('\n')}`)
+            }
+
+            if (ctx.length) {
+              systemParts.push('\n\n## Stellar Global Supplies — Internal Business Data\n' + ctx.join('\n\n'))
+            }
+
           } catch (e) { console.error('Neon error:', e.message) }
         }
       }
