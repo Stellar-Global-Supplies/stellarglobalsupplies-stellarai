@@ -19,16 +19,28 @@ const Logo = () => (
   </svg>
 )
 
-export default function Sidebar({ open, history, author, onNewChat, onSelectHistory }) {
+function getInitials(name) {
+  if (!name) return '?'
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+}
+
+export default function Sidebar({ open, history, user, onLogout, onNewChat, onSelectHistory }) {
   const [search, setSearch] = useState('')
 
-  const grouped = {
-    Today: history.slice(0, 3),
-    Yesterday: history.slice(3, 6),
-    'Last 7 days': history.slice(6),
-  }
+  const filtered = history.filter(h => h.title.toLowerCase().includes(search.toLowerCase()))
 
-  const filtered = (items) => items.filter(h => h.title.toLowerCase().includes(search.toLowerCase()))
+  // Group by Today / Yesterday / Older
+  const now   = Date.now()
+  const DAY   = 86400000
+  const today     = filtered.filter(h => !h.ts || now - new Date(h.ts).getTime() < DAY)
+  const yesterday = filtered.filter(h => h.ts && now - new Date(h.ts).getTime() >= DAY && now - new Date(h.ts).getTime() < 2 * DAY)
+  const older     = filtered.filter(h => h.ts && now - new Date(h.ts).getTime() >= 2 * DAY)
+
+  const groups = [
+    { label: 'Today',     items: today },
+    { label: 'Yesterday', items: yesterday },
+    { label: 'Older',     items: older },
+  ]
 
   return (
     <aside className={`sidebar${open ? '' : ' collapsed'}`}>
@@ -62,13 +74,17 @@ export default function Sidebar({ open, history, author, onNewChat, onSelectHist
       </div>
 
       <div className="sidebar-history">
-        {Object.entries(grouped).map(([label, items]) => {
-          const f = filtered(items)
-          if (!f.length) return null
+        {filtered.length === 0 && (
+          <div style={{ padding: '16px 8px', fontSize: 13, color: '#aaa', textAlign: 'center' }}>
+            No chat history yet
+          </div>
+        )}
+        {groups.map(({ label, items }) => {
+          if (!items.length) return null
           return (
             <div className="history-section" key={label}>
               <div className="history-label">{label}</div>
-              {f.map(item => (
+              {items.map(item => (
                 <div
                   key={item.id}
                   className={`history-item${item.active ? ' active' : ''}`}
@@ -88,14 +104,16 @@ export default function Sidebar({ open, history, author, onNewChat, onSelectHist
       </div>
 
       <div className="sidebar-bottom">
-        <div className="profile-card">
-          <div className="avatar">{author.initials}</div>
+        <div className="profile-card" onClick={onLogout} title="Sign out">
+          <div className="avatar">{getInitials(user?.name || user?.email)}</div>
           <div className="profile-info">
-            <div className="profile-name">{author.name}</div>
-            <div className="profile-sub">{author.role}</div>
+            <div className="profile-name">{user?.name || user?.email}</div>
+            <div className="profile-sub">Sign out</div>
           </div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2">
-            <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
           </svg>
         </div>
       </div>

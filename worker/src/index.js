@@ -1,9 +1,10 @@
 import { AutoRouter, cors } from 'itty-router'
-import { handleChat }    from './routes/chat.js'
-import { handleImagine } from './routes/imagine.js'
-import { handleHistory } from './routes/history.js'
-import { handleSearch }  from './routes/search.js'
-import { verifyJWT }     from './auth.js'
+import { handleChat }     from './routes/chat.js'
+import { handleImagine }  from './routes/imagine.js'
+import { handleHistory }  from './routes/history.js'
+import { handleSearch }   from './routes/search.js'
+import { handleRegister, handleLogin } from './routes/auth.js'
+import { verifyJWT }      from './auth.js'
 
 const { preflight, corsify } = cors({
   origin: (origin, req) => req.env?.ALLOWED_ORIGIN || '*',
@@ -18,12 +19,19 @@ async function withAuth(req) {
   const auth = req.headers.get('Authorization') || ''
   const token = auth.replace('Bearer ', '').trim()
   if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
-  const user = await verifyJWT(token, req.env.JWT_SECRET)
+  const secret = typeof req.env.JWT_SECRET?.get === 'function'
+    ? await req.env.JWT_SECRET.get()
+    : req.env.JWT_SECRET
+  const user = await verifyJWT(token, secret)
   if (!user) return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401 })
   req.user = user
 }
 
-// ── Routes ──
+// ── Public auth routes ──
+router.post('/api/auth/register', handleRegister)
+router.post('/api/auth/login',    handleLogin)
+
+// ── Protected routes ──
 router.post('/api/chat',    withAuth, handleChat)
 router.post('/api/imagine', withAuth, handleImagine)
 router.get ('/api/history', withAuth, handleHistory)

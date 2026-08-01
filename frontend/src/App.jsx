@@ -4,32 +4,53 @@ import Topbar from './components/Topbar'
 import ChatArea from './components/ChatArea'
 import InputArea from './components/InputArea'
 import EmptyState from './components/EmptyState'
-
-const AUTHORS = [
-  { name: 'Arjun Rao',     role: 'Procurement Manager',  initials: 'AR' },
-  { name: 'Priya Mehta',   role: 'Supply Chain Lead',     initials: 'PM' },
-  { name: 'Vikram Shah',   role: 'Operations Director',   initials: 'VS' },
-  { name: 'Neha Joshi',    role: 'Sourcing Analyst',      initials: 'NJ' },
-  { name: 'Rahul Kapoor',  role: 'Category Manager',      initials: 'RK' },
-]
+import Login from './components/Login'
 
 const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787'
 
+function getStoredAuth() {
+  try {
+    const token = localStorage.getItem('token')
+    const user  = JSON.parse(localStorage.getItem('user') || 'null')
+    return token && user ? { token, user } : null
+  } catch { return null }
+}
+
 export default function App() {
-  const [sidebarOpen, setSidebarOpen]   = useState(true)
-  const [model, setModel]               = useState('llama-3.3-70b-versatile')
-  const [entData, setEntData]           = useState(false)
-  const [imgGen, setImgGen]             = useState(false)
-  const [webSearch, setWebSearch]       = useState(false)
-  const [messages, setMessages]         = useState([])
-  const [isTyping, setIsTyping]         = useState(false)
-  const [history, setHistory]           = useState([
-    { id: 1, title: 'Industrial supply pricing Q3',   active: true  },
-    { id: 2, title: 'Analyse vendor comparison CSV',  active: false },
-    { id: 3, title: 'Inventory reorder thresholds',   active: false },
-  ])
-  const [author]                        = useState(() => AUTHORS[Math.floor(Math.random() * AUTHORS.length)])
-  const chatRef                         = useRef(null)
+  const stored = getStoredAuth()
+
+  const [auth, setAuth]             = useState(stored)          // { token, user } | null
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [model, setModel]           = useState('llama-3.3-70b-versatile')
+  const [entData, setEntData]       = useState(false)
+  const [imgGen, setImgGen]         = useState(false)
+  const [webSearch, setWebSearch]   = useState(false)
+  const [messages, setMessages]     = useState([])
+  const [isTyping, setIsTyping]     = useState(false)
+  const [history, setHistory]       = useState([])
+  const chatRef                     = useRef(null)
+
+  const token = auth?.token || ''
+
+  // ── Load real history from worker ──
+  useEffect(() => {
+    if (!token) return
+    fetch(`${WORKER_URL}/api/history`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.sessions) {
+          setHistory(data.sessions.map(s => ({
+            id: s.id,
+            title: s.title || 'Untitled chat',
+            active: false,
+            ts: s.updated_at,
+          })))
+        }
+      })
+      .catch(() => {})
+  }, [token])
 
   const scrollToBottom = useCallback(() => {
     chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' })
@@ -51,13 +72,23 @@ export default function App() {
     })
   }, [])
 
+  function handleLogin(newToken, user) {
+    setAuth({ token: newToken, user })
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    setAuth(null)
+    setMessages([])
+    setHistory([])
+  }
+
   const sendMessage = useCallback(async ({ text, file, imgPrompt }) => {
     if (isTyping) return
 
-    // User message
     addMessage({ role: 'user', text, file: file?.name })
 
-    // Add to history
     if (text) {
       const title = text.length > 36 ? text.slice(0, 36) + '…' : text
       setHistory(prev => [{ id: Date.now(), title, active: true }, ...prev.map(h => ({ ...h, active: false }))])
@@ -71,12 +102,12 @@ export default function App() {
       try {
         const res = await fetch(`${WORKER_URL}/api/imagine`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ prompt: imgPrompt, model })
         })
         const data = await res.json()
         updateLastAssistant(m => ({ ...m, status: null, imgUrl: data.url, text: `Image generated for: "${imgPrompt}"` }))
-      } catch (e) {
+      } catch {
         updateLastAssistant(m => ({ ...m, status: null, text: 'Image generation failed. Please try again.' }))
       }
       setIsTyping(false)
@@ -87,8 +118,7 @@ export default function App() {
     addMessage({ role: 'assistant', text: '', status: 'Launching worker…' })
 
     try {
-      // Build form data if file attached
-      let body, headers = { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
+      let body, headers = { Authorization: `Bearer ${token}` }
 
       if (file) {
         const fd = new FormData()
@@ -106,9 +136,13 @@ export default function App() {
 
       const res = await fetch(`${WORKER_URL}/api/chat`, { method: 'POST', headers, body })
 
+      if (res.status === 401) {
+        handleLogout()
+        return
+      }
       if (!res.ok) throw new Error(`Worker error ${res.status}`)
 
-      const reader = res.body.getReader()
+      const reader  = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
@@ -125,29 +159,29 @@ export default function App() {
           if (raw === '[DONE]') break
           try {
             const evt = JSON.parse(raw)
-            if (evt.type === 'status') {
-              updateLastAssistant(m => ({ ...m, status: evt.text }))
-            } else if (evt.type === 'token') {
-              updateLastAssistant(m => ({ ...m, status: null, text: (m.text || '') + evt.delta }))
-            } else if (evt.type === 'done') {
-              updateLastAssistant(m => ({ ...m, status: null }))
-            }
+            if (evt.type === 'status')      updateLastAssistant(m => ({ ...m, status: evt.text }))
+            else if (evt.type === 'token')  updateLastAssistant(m => ({ ...m, status: null, text: (m.text || '') + evt.delta }))
+            else if (evt.type === 'done')   updateLastAssistant(m => ({ ...m, status: null }))
           } catch {}
         }
       }
     } catch (err) {
-      updateLastAssistant(m => ({ ...m, status: null, text: `Error: ${err.message}. Make sure the Worker is deployed and VITE_WORKER_URL is set.` }))
+      updateLastAssistant(m => ({ ...m, status: null, text: `Error: ${err.message}` }))
     }
 
     setIsTyping(false)
-  }, [isTyping, model, entData, imgGen, webSearch, messages, addMessage, updateLastAssistant])
+  }, [isTyping, model, entData, imgGen, webSearch, messages, token, addMessage, updateLastAssistant])
+
+  // ── Not logged in → show login page ──
+  if (!auth) return <Login onLogin={handleLogin} />
 
   return (
     <div className="app">
       <Sidebar
         open={sidebarOpen}
         history={history}
-        author={author}
+        user={auth.user}
+        onLogout={handleLogout}
         onNewChat={() => setMessages([])}
         onSelectHistory={id => setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))}
       />
