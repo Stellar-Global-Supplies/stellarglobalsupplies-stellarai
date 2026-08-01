@@ -105,7 +105,13 @@ export default function App() {
           body: JSON.stringify({ prompt: imgPrompt, model })
         })
         const data = await res.json()
-        updateLastAssistant(m => ({ ...m, status: null, imgUrl: data.url, text: `Image generated for: "${imgPrompt}"` }))
+        if (data.error) {
+          updateLastAssistant(m => ({ ...m, status: null, text: `Image generation failed: ${data.error}` }))
+        } else if (data.url) {
+          updateLastAssistant(m => ({ ...m, status: null, imgUrl: data.url, text: `Here is the generated image for: "${imgPrompt}"` }))
+        } else {
+          updateLastAssistant(m => ({ ...m, status: null, text: 'Image generation failed — no image returned from the server.' }))
+        }
       } catch {
         updateLastAssistant(m => ({ ...m, status: null, text: 'Image generation failed. Please try again.' }))
       }
@@ -195,9 +201,24 @@ export default function App() {
         token={token}
         onLogout={handleLogout}
         onNewChat={() => { setMessages([]); setSessionId(null) }}
-        onSelectHistory={id => {
+        onSelectHistory={async id => {
           setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))
           setSessionId(id)
+          setMessages([])
+          try {
+            const res = await fetch(`${WORKER_URL}/api/history?session_id=${id}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            const data = await res.json()
+            if (data?.messages) {
+              setMessages(data.messages.map(m => ({
+                id: m.id,
+                role: m.role,
+                text: m.content,
+                ts: new Date(m.created_at).getTime(),
+              })))
+            }
+          } catch (e) { console.error('Load session error:', e) }
         }}
         onDeleteHistory={id => setHistory(prev => prev.filter(h => h.id !== id))}
       />
