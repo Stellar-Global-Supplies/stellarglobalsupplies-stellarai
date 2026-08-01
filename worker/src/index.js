@@ -7,6 +7,7 @@ import { handleHistory, handleDeleteSession } from './routes/history.js'
 import { verifyJWT }                   from './auth.js'
 
 const ALLOWED_ORIGINS = [
+  'https://ai.stellarglobalsupplies.com',
   'https://stellarglobalsupplies-stellarai.pages.dev',
   'http://localhost:5173',
   'http://localhost:4173',
