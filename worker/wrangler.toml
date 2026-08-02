@@ -21,6 +21,10 @@ database_id   = "7c98c739-c76c-4eeb-9ddd-699d0e832799"
 [triggers]
 crons = ["0 3 * * *"]
 
+# Workers AI binding — for image generation (FLUX.1-schnell)
+[ai]
+binding = "AI"
+
 # Secrets Store bindings
 [[secrets_store_secrets]]
 binding     = "GROQ_API_KEY"
@@ -42,10 +46,6 @@ binding     = "TAVILY_API_KEY"
 secret_name = "TAVILY_API_KEY"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
-[[secrets_store_secrets]]
-binding     = "GRADIO_URL"
-secret_name = "GRADIO_URL"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
 [[secrets_store_secrets]]
 binding     = "ALLOWED_ORIGIN"

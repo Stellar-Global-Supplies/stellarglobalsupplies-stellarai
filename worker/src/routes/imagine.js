@@ -3,20 +3,20 @@ export async function handleImagine(req, env) {
   if (!prompt) return new Response(JSON.stringify({ error: 'prompt required' }), { status: 400 })
 
   try {
-    // Pollinations.ai — free, no API key, no signup required
-    // Returns image directly as binary, we proxy it as base64 data URL
-    const encodedPrompt = encodeURIComponent(prompt)
-    const seed = Math.floor(Math.random() * 999999)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&nologo=true&enhance=true`
+    // Cloudflare Workers AI — free daily budget, no external API needed
+    // Model: FLUX.1-schnell — fast, high quality
+    const response = await env.AI.run(
+      '@cf/black-forest-labs/flux-1-schnell',
+      {
+        prompt,
+        num_steps: 4,  // schnell is optimised for 4 steps
+      }
+    )
 
-    // Fetch the image and convert to base64 so it works cross-origin in the browser
-    const imgRes = await fetch(imageUrl)
-    if (!imgRes.ok) throw new Error(`Pollinations error ${imgRes.status}`)
-
-    const buffer     = await imgRes.arrayBuffer()
-    const base64     = btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
-    const dataUrl    = `data:${contentType};base64,${base64}`
+    // Response is a ReadableStream of the raw image bytes (PNG)
+    const buffer   = await new Response(response.image).arrayBuffer()
+    const base64   = btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    const dataUrl  = `data:image/png;base64,${base64}`
 
     return new Response(JSON.stringify({ url: dataUrl, prompt }), {
       headers: { 'Content-Type': 'application/json' }
