@@ -3,20 +3,16 @@ export async function handleImagine(req, env) {
   if (!prompt) return new Response(JSON.stringify({ error: 'prompt required' }), { status: 400 })
 
   try {
-    // Cloudflare Workers AI — free daily budget, no external API needed
-    // Model: FLUX.1-schnell — fast, high quality
     const response = await env.AI.run(
       '@cf/black-forest-labs/flux-1-schnell',
-      {
-        prompt,
-        num_steps: 4,  // schnell is optimised for 4 steps
-      }
+      { prompt, num_steps: 4 }
     )
 
-    // Response is a ReadableStream of the raw image bytes (PNG)
-    const buffer   = await new Response(response.image).arrayBuffer()
-    const base64   = btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    const dataUrl  = `data:image/png;base64,${base64}`
+    // Workers AI returns { image: base64string } for image models — use it directly
+    const base64 = response.image
+    if (!base64) throw new Error('No image returned from Workers AI')
+
+    const dataUrl = `data:image/png;base64,${base64}`
 
     return new Response(JSON.stringify({ url: dataUrl, prompt }), {
       headers: { 'Content-Type': 'application/json' }
