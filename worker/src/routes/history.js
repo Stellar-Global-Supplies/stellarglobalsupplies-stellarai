@@ -36,3 +36,24 @@ export async function handleDeleteSession(req, env) {
 
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
 }
+
+export async function handleDeleteAllSessions(req, env) {
+  const sessions = await env.DB.prepare(
+    'SELECT id FROM sessions WHERE user_id = ?'
+  ).bind(req.user.id).all()
+
+  if (sessions.results?.length) {
+    const ids = sessions.results.map(s => s.id)
+    // Delete messages first (FK), then sessions
+    for (const id of ids) {
+      await env.DB.prepare('DELETE FROM messages WHERE session_id = ?').bind(id).run()
+    }
+    await env.DB.prepare(
+      `DELETE FROM sessions WHERE user_id = ?`
+    ).bind(req.user.id).run()
+  }
+
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  })
+}

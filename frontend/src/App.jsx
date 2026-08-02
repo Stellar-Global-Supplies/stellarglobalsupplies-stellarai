@@ -80,6 +80,20 @@ export default function App() {
     setAuth({ token: newToken, user })
   }
 
+  async function handleClearAll() {
+    // Optimistically clear UI
+    setHistory([])
+    setMessages([])
+    setSessionId(null)
+    // Delete all sessions on worker
+    try {
+      await fetch(`${WORKER_URL}/api/history/all`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    } catch {}
+  }
+
   function handleLogout() {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
@@ -243,6 +257,8 @@ export default function App() {
           onToggleEnt={() => setEntData(v => !v)}
           imgGen={imgGen}
           onToggleImg={() => setImgGen(v => !v)}
+          onClearAll={handleClearAll}
+          onLogout={handleLogout}
         />
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
           {messages.length === 0

@@ -3,7 +3,7 @@ import { handleChat }                  from './routes/chat.js'
 import { handleImagine }               from './routes/imagine.js'
 import { handleSearch }                from './routes/search.js'
 import { handleRegister, handleLogin } from './routes/auth.js'
-import { handleHistory, handleDeleteSession } from './routes/history.js'
+import { handleHistory, handleDeleteSession, handleDeleteAllSessions } from './routes/history.js'
 import { verifyJWT }                   from './auth.js'
 
 const ALLOWED_ORIGINS = [
@@ -42,7 +42,8 @@ router.post('/api/auth/login',    handleLogin)
 router.post('/api/chat',    withAuth, handleChat)
 router.post('/api/imagine', withAuth, handleImagine)
 router.get ('/api/history',       withAuth, handleHistory)
-router.delete('/api/history/:id', withAuth, handleDeleteSession)
+router.delete('/api/history/:id',  withAuth, handleDeleteSession)
+router.delete('/api/history/all',   withAuth, handleDeleteAllSessions)
 router.post('/api/search',  withAuth, handleSearch)
 router.get ('/api/health',  () => new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
   headers: { 'Content-Type': 'application/json' }
