@@ -1,10 +1,43 @@
 import { useState, useEffect, useRef } from 'react'
 
+// Model IDs must match CF_MODEL_MAP keys in worker/src/routes/chat.js
 const MODELS = [
-  { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B',  desc: 'Best quality · Versatile' },
-  { id: 'llama3-8b-8192',          name: 'Llama 3 8B',      desc: 'Fast · Lightweight'       },
-  { id: 'mixtral-8x7b-32768',      name: 'Mixtral 8x7B',    desc: 'Long context · 32K'       },
-  { id: 'gemma2-9b-it',            name: 'Gemma 2 9B',       desc: 'Google · Efficient'       },
+  {
+    id:    'llama-3.3-70b',
+    name:  'Llama 3.3 · 70B',
+    desc:  'Best quality · Recommended',
+    badge: null,
+  },
+  {
+    id:    'llama-4-scout',
+    name:  'Llama 4 Scout · 17B',
+    desc:  'Multimodal · Reads images',
+    badge: '👁️ Vision',
+  },
+  {
+    id:    'gpt-oss-120b',
+    name:  'GPT-OSS · 120B',
+    desc:  'Powerful reasoning · OpenAI model',
+    badge: null,
+  },
+  {
+    id:    'qwq-32b',
+    name:  'QwQ · 32B',
+    desc:  'Deep analysis · Finance & data',
+    badge: '🧠 Reasoning',
+  },
+  {
+    id:    'glm-4.7-flash',
+    name:  'GLM 4.7 Flash',
+    desc:  'Fast · 131k context · Hindi/English',
+    badge: '⚡ Flash',
+  },
+  {
+    id:    'llama-3.1-8b',
+    name:  'Llama 3.1 · 8B',
+    desc:  'Fastest · Simple queries',
+    badge: null,
+  },
 ]
 
 export default function Topbar({
@@ -57,10 +90,20 @@ export default function Topbar({
           <button className="model-selector" onClick={() => setModelOpen(o => !o)}>
             <div className="model-dot"/>
             <span>{currentModel.name}</span>
+            {currentModel.badge && (
+              <span style={{
+                fontSize: '10px', fontWeight: 600, padding: '1px 6px',
+                borderRadius: '99px', background: 'rgba(0,0,0,0.07)',
+                color: '#555', marginLeft: 2,
+              }}>
+                {currentModel.badge}
+              </span>
+            )}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="6 9 12 15 18 9"/>
             </svg>
           </button>
+
           {modelOpen && (
             <div className="model-dropdown">
               {MODELS.map(m => (
@@ -73,8 +116,19 @@ export default function Topbar({
                     style={{ opacity: m.id === model ? 1 : 0, flexShrink: 0 }}>
                     <polyline points="20 6 9 17 4 12"/>
                   </svg>
-                  <div>
-                    <div className="model-name">{m.name}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className="model-name">{m.name}</span>
+                      {m.badge && (
+                        <span style={{
+                          fontSize: '10px', fontWeight: 600, padding: '1px 6px',
+                          borderRadius: '99px', background: 'rgba(0,0,0,0.07)',
+                          color: '#666', whiteSpace: 'nowrap',
+                        }}>
+                          {m.badge}
+                        </span>
+                      )}
+                    </div>
                     <div className="model-desc">{m.desc}</div>
                   </div>
                 </div>

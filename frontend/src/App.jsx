@@ -19,19 +19,19 @@ function getStoredAuth() {
 export default function App() {
   const stored = getStoredAuth()
 
-  const [auth, setAuth]             = useState(stored)          // { token, user } | null
-  const [sidebarOpen, setSidebarOpen]       = useState(true)
+  const [auth, setAuth]                       = useState(stored)
+  const [sidebarOpen, setSidebarOpen]         = useState(true)
   const [mobileSidebarOpen, setMobileSidebar] = useState(false)
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
-  const [model, setModel]           = useState('llama-3.3-70b-versatile')
-  const [entData, setEntData]       = useState(false)
-  const [imgGen, setImgGen]         = useState(false)
-  const [webSearch, setWebSearch]   = useState(false)
-  const [messages, setMessages]     = useState([])
-  const [isTyping, setIsTyping]     = useState(false)
-  const [history, setHistory]       = useState([])
-  const [sessionId, setSessionId]   = useState(null)
-  const chatRef                     = useRef(null)
+  const [model, setModel]       = useState('llama-3.3-70b')   // ← updated to CF model ID
+  const [entData, setEntData]   = useState(false)
+  const [imgGen, setImgGen]     = useState(false)
+  const [webSearch, setWebSearch] = useState(false)
+  const [messages, setMessages] = useState([])
+  const [isTyping, setIsTyping] = useState(false)
+  const [history, setHistory]   = useState([])
+  const [sessionId, setSessionId] = useState(null)
+  const chatRef = useRef(null)
 
   const token = auth?.token || ''
 
@@ -44,13 +44,12 @@ export default function App() {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.sessions) {
-          const sessions = data.sessions.map((s, i) => ({
+          setHistory(data.sessions.map(s => ({
             id: s.id,
             title: s.title || 'Untitled chat',
             active: false,
             ts: s.updated_at,
-          }))
-          setHistory(sessions)
+          })))
         }
       })
       .catch(() => {})
@@ -81,11 +80,9 @@ export default function App() {
   }
 
   async function handleClearAll() {
-    // Optimistically clear UI
     setHistory([])
     setMessages([])
     setSessionId(null)
-    // Delete all sessions on worker
     try {
       await fetch(`${WORKER_URL}/api/history/all`, {
         method: 'DELETE',
@@ -102,16 +99,21 @@ export default function App() {
     setHistory([])
   }
 
-  const sendMessage = useCallback(async ({ text, file, imgPrompt }) => {
+  const sendMessage = useCallback(async ({ text, file, imgFile, imgPrompt }) => {
     if (isTyping) return
 
-    addMessage({ role: 'user', text, file: file?.name, ts: Date.now() })
-
-    // Session ID and history entry are set after worker responds with real session ID
+    // Show user message — include image filename if present
+    addMessage({
+      role: 'user',
+      text,
+      file: file?.name,
+      imgFile: imgFile?.name,  // shown as chip in ChatArea
+      ts: Date.now(),
+    })
 
     setIsTyping(true)
 
-    // Image gen branch
+    // ── Image generation branch ──────────────────────────────────────────────
     if (imgGen && imgPrompt) {
       addMessage({ role: 'assistant', text: '', status: 'Generating image…', imgPrompt, ts: Date.now() })
       try {
@@ -135,32 +137,41 @@ export default function App() {
       return
     }
 
-    // Chat branch — SSE streaming
+    // ── Chat branch — SSE streaming ──────────────────────────────────────────
     addMessage({ role: 'assistant', text: '', status: 'Launching worker…', ts: Date.now() })
 
     try {
       let body, headers = { Authorization: `Bearer ${token}` }
 
-      if (file) {
+      // Always use FormData when there's any file OR image attached
+      if (file || imgFile) {
         const fd = new FormData()
-        fd.append('file', file)
+        if (file)    fd.append('file', file)
+        if (imgFile) fd.append('image', imgFile)   // ← vision image for Llama 4 Scout
         fd.append('message', text || '')
         fd.append('model', model)
         fd.append('entData', entData)
         fd.append('webSearch', webSearch)
-        fd.append('history', JSON.stringify(messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text }))))
+        fd.append('sessionId', sessionId || '')
+        fd.append('history', JSON.stringify(
+          messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text }))
+        ))
         body = fd
       } else {
         headers['Content-Type'] = 'application/json'
-        body = JSON.stringify({ message: text, model, entData, webSearch, sessionId, history: messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text })) })
+        body = JSON.stringify({
+          message: text,
+          model,
+          entData,
+          webSearch,
+          sessionId,
+          history: messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text }))
+        })
       }
 
       const res = await fetch(`${WORKER_URL}/api/chat`, { method: 'POST', headers, body })
 
-      if (res.status === 401) {
-        handleLogout()
-        return
-      }
+      if (res.status === 401) { handleLogout(); return }
       if (!res.ok) throw new Error(`Worker error ${res.status}`)
 
       const reader  = res.body.getReader()
@@ -180,9 +191,11 @@ export default function App() {
           if (raw === '[DONE]') break
           try {
             const evt = JSON.parse(raw)
-            if (evt.type === 'status')      updateLastAssistant(m => ({ ...m, status: evt.text }))
-            else if (evt.type === 'token')  updateLastAssistant(m => ({ ...m, status: null, text: (m.text || '') + evt.delta }))
-            else if (evt.type === 'done') {
+            if (evt.type === 'status') {
+              updateLastAssistant(m => ({ ...m, status: evt.text }))
+            } else if (evt.type === 'token') {
+              updateLastAssistant(m => ({ ...m, status: null, text: (m.text || '') + evt.delta }))
+            } else if (evt.type === 'done') {
               updateLastAssistant(m => ({ ...m, status: null }))
               if (evt.sessionId && !sessionId) {
                 const sid = evt.sessionId
@@ -203,14 +216,12 @@ export default function App() {
     }
 
     setIsTyping(false)
-  }, [isTyping, model, entData, imgGen, webSearch, messages, token, addMessage, updateLastAssistant])
+  }, [isTyping, model, entData, imgGen, webSearch, messages, token, sessionId, addMessage, updateLastAssistant])
 
-  // ── Not logged in → show login page ──
   if (!auth) return <Login onLogin={handleLogin} />
 
   return (
     <div className="app">
-      {/* Mobile overlay */}
       <div
         className={`sidebar-overlay${mobileSidebarOpen ? ' show' : ''}`}
         onClick={() => setMobileSidebar(false)}
@@ -272,6 +283,7 @@ export default function App() {
           imgGen={imgGen}
           webSearch={webSearch}
           onToggleWebSearch={() => setWebSearch(v => !v)}
+          model={model}
         />
       </main>
     </div>

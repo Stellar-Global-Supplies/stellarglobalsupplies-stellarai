@@ -8,11 +8,8 @@ function renderMarkdown(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 
-  // Code blocks
   t = t.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
   t = t.replace(/`([^`]+)`/g, '<code>$1</code>')
-
-  // Bold / italic
   t = t.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>')
@@ -78,7 +75,8 @@ function AssistantLogo() {
 function CopyIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      <rect x="9" y="9" width="13" height="13" rx="2"/>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
     </svg>
   )
 }
@@ -86,12 +84,25 @@ function CopyIcon() {
 function UserMessage({ msg }) {
   return (
     <div className="message-row user">
+      {/* Document file chip */}
       {msg.file && (
         <div className="file-chip" style={{ marginBottom: 6 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
           </svg>
           <span>{msg.file}</span>
+        </div>
+      )}
+      {/* Image file chip — shown when user attached an image for vision */}
+      {msg.imgFile && (
+        <div className="file-chip" style={{ marginBottom: 6, background: 'rgba(59,130,246,0.08)', borderColor: 'rgba(59,130,246,0.25)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <span style={{ color: '#2563eb' }}>{msg.imgFile}</span>
         </div>
       )}
       {msg.text && <div className="msg-bubble">{msg.text}</div>}
@@ -103,13 +114,11 @@ function UserMessage({ msg }) {
 }
 
 function AssistantMessage({ msg }) {
-  const startRef  = useRef(msg.ts)
+  const startRef = useRef(msg.ts)
   const [elapsed, setElapsed] = useState(null)
 
-  // Start a live timer while streaming, freeze when done
   useEffect(() => {
     if (!msg.status && msg.text) {
-      // Response complete — show final elapsed
       const secs = ((Date.now() - startRef.current) / 1000).toFixed(1)
       setElapsed(secs)
       return
@@ -127,9 +136,7 @@ function AssistantMessage({ msg }) {
       <div className="assistant-header">
         <AssistantLogo />
         <span className="assistant-name">Stellar AI</span>
-        {elapsed && (
-          <span className="response-time">{elapsed}s</span>
-        )}
+        {elapsed && <span className="response-time">{elapsed}s</span>}
       </div>
 
       {msg.status && (
@@ -142,7 +149,11 @@ function AssistantMessage({ msg }) {
       {msg.imgUrl ? (
         <div className="msg-bubble">
           <p style={{ marginBottom: 10, color: '#555', fontSize: 13 }}>{msg.text}</p>
-          <img src={msg.imgUrl} alt="Generated" style={{ borderRadius: 12, maxWidth: 400, width: '100%', border: '1px solid #e5e5e5' }} />
+          <img
+            src={msg.imgUrl}
+            alt="Generated"
+            style={{ borderRadius: 12, maxWidth: 400, width: '100%', border: '1px solid #e5e5e5' }}
+          />
         </div>
       ) : msg.text ? (
         <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />

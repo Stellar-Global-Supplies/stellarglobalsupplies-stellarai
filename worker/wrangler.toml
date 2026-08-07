@@ -21,16 +21,12 @@ database_id   = "7c98c739-c76c-4eeb-9ddd-699d0e832799"
 [triggers]
 crons = ["0 3 * * *"]
 
-# Workers AI binding — for image generation (FLUX.1-schnell)
+# Workers AI binding — covers BOTH chat (LLMs) and image generation (FLUX)
+# GROQ_API_KEY is no longer needed — inference is handled entirely by this binding
 [ai]
 binding = "AI"
 
 # Secrets Store bindings
-[[secrets_store_secrets]]
-binding     = "GROQ_API_KEY"
-secret_name = "GROQ_API_KEY"
-store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
 [[secrets_store_secrets]]
 binding     = "JWT_SECRET"
 secret_name = "JWT_SECRET"
@@ -45,7 +41,6 @@ store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 binding     = "TAVILY_API_KEY"
 secret_name = "TAVILY_API_KEY"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
-
 
 [[secrets_store_secrets]]
 binding     = "ALLOWED_ORIGIN"
