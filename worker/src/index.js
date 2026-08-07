@@ -45,15 +45,55 @@ router.get ('/api/history',       withAuth, handleHistory)
 router.delete('/api/history/:id',  withAuth, handleDeleteSession)
 router.delete('/api/history/all',   withAuth, handleDeleteAllSessions)
 router.post('/api/search',  withAuth, handleSearch)
-router.get ('/api/health',  () => new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
-  headers: { 'Content-Type': 'application/json' }
-}))
+// DB checks intentionally omitted — D1 used only for cron cleanup, not request path.
+// Supabase / NeonDB / external services excluded to avoid false positives on latency.
+router.get('/health', async (req, env) => {
+  const checks = {
+    // ── Required secrets — rename to match your wrangler.toml ───────────────
+    jwt_secret:     env.JWT_SECRET     ? "ok" : "missing",
+    // AI provider key used by handleChat / handleImagine (e.g. OPENAI_API_KEY):
+    ai_api_key:     env.AI_API_KEY     ? "ok" : "missing",
+    // Search API key used by handleSearch (e.g. Brave / Serper / Tavily):
+    search_api_key: env.SEARCH_API_KEY ? "ok" : "missing",
+  }
+
+  const allOk = Object.values(checks).every((v) => v === "ok")
+
+  return new Response(
+    JSON.stringify({
+      service: "stellar-ai-worker",
+      app: "stellar-ai-platform",
+      status: allOk ? "ok" : "degraded",
+      checks,
+      ts: new Date().toISOString(),
+    }),
+    {
+      status: allOk ? 200 : 503,
+      headers: { "Content-Type": "application/json" },
+    }
+  )
+})
 
 // ── Scheduled cron ──
 async function scheduled(event, env) {
   await env.DB.prepare(`DELETE FROM messages WHERE created_at < datetime('now', '-6 months')`).run()
   await env.DB.prepare(`DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)`).run()
   console.log('Cron cleanup done:', new Date().toISOString())
+
+  // ── Ping Better Stack heartbeat (signals cron ran successfully) ────────────
+  // Create a Heartbeat monitor in Better Stack → set interval to match your cron
+  // → copy the URL → add as secret: wrangler secret put BETTER_STACK_HEARTBEAT_URL
+  const heartbeatUrl = typeof env.BETTER_STACK_HEARTBEAT_URL?.get === 'function'
+    ? await env.BETTER_STACK_HEARTBEAT_URL.get()
+    : env.BETTER_STACK_HEARTBEAT_URL
+  if (heartbeatUrl) {
+    try {
+      await fetch(heartbeatUrl)
+      console.log('[heartbeat] Better Stack pinged ✅')
+    } catch (err) {
+      console.warn('[heartbeat] ping failed:', err.message)
+    }
+  }
 }
 
 export default {
