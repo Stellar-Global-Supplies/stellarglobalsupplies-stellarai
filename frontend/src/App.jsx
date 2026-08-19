@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import Sidebar from './components/Sidebar'
-import Topbar from './components/Topbar'
-import ChatArea from './components/ChatArea'
-import InputArea from './components/InputArea'
-import EmptyState from './components/EmptyState'
-import Login from './components/Login'
+import Sidebar     from './components/Sidebar'
+import Topbar      from './components/Topbar'
+import ChatArea    from './components/ChatArea'
+import InputArea   from './components/InputArea'
+import EmptyState  from './components/EmptyState'
+import Login       from './components/Login'
+import SSOCallback from './components/SSOCallback'
 
-const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787'
+const WORKER_URL  = import.meta.env.VITE_WORKER_URL  || 'http://localhost:8787'
+const LANDING_URL = import.meta.env.VITE_LANDING_URL || 'https://apps.stellarglobalsupplies.com'
 
 function getStoredAuth() {
   try {
@@ -23,19 +25,27 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen]         = useState(true)
   const [mobileSidebarOpen, setMobileSidebar] = useState(false)
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
-  const [model, setModel]       = useState('llama-3.3-70b')   // ← updated to CF model ID
-  const [entData, setEntData]   = useState(false)
-  const [imgGen, setImgGen]     = useState(false)
+  const [model, setModel]         = useState('llama-3.3-70b')
+  const [entData, setEntData]     = useState(false)
+  const [imgGen, setImgGen]       = useState(false)
   const [webSearch, setWebSearch] = useState(false)
-  const [messages, setMessages] = useState([])
-  const [isTyping, setIsTyping] = useState(false)
-  const [history, setHistory]   = useState([])
+  const [messages, setMessages]   = useState([])
+  const [isTyping, setIsTyping]   = useState(false)
+  const [history, setHistory]     = useState([])
   const [sessionId, setSessionId] = useState(null)
   const chatRef = useRef(null)
 
   const token = auth?.token || ''
 
-  // ── Load real history from worker ──
+  // ✅ Handle /sso-callback before anything else
+  if (window.location.pathname === '/sso-callback') {
+    return (
+      <SSOCallback onLogin={(newToken, user) => {
+        setAuth({ token: newToken, user })
+      }} />
+    )
+  }
+
   useEffect(() => {
     if (!token) return
     fetch(`${WORKER_URL}/api/history`, {
@@ -91,29 +101,29 @@ export default function App() {
     } catch {}
   }
 
+  // ✅ Sign out: clear localStorage + redirect to portal
   function handleLogout() {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     setAuth(null)
     setMessages([])
     setHistory([])
+    window.location.replace(LANDING_URL)
   }
 
   const sendMessage = useCallback(async ({ text, file, imgFile, imgPrompt }) => {
     if (isTyping) return
 
-    // Show user message — include image filename if present
     addMessage({
       role: 'user',
       text,
       file: file?.name,
-      imgFile: imgFile?.name,  // shown as chip in ChatArea
+      imgFile: imgFile?.name,
       ts: Date.now(),
     })
 
     setIsTyping(true)
 
-    // ── Image generation branch ──────────────────────────────────────────────
     if (imgGen && imgPrompt) {
       addMessage({ role: 'assistant', text: '', status: 'Generating image…', imgPrompt, ts: Date.now() })
       try {
@@ -137,17 +147,15 @@ export default function App() {
       return
     }
 
-    // ── Chat branch — SSE streaming ──────────────────────────────────────────
     addMessage({ role: 'assistant', text: '', status: 'Launching worker…', ts: Date.now() })
 
     try {
       let body, headers = { Authorization: `Bearer ${token}` }
 
-      // Always use FormData when there's any file OR image attached
       if (file || imgFile) {
         const fd = new FormData()
         if (file)    fd.append('file', file)
-        if (imgFile) fd.append('image', imgFile)   // ← vision image for Llama 4 Scout
+        if (imgFile) fd.append('image', imgFile)
         fd.append('message', text || '')
         fd.append('model', model)
         fd.append('entData', entData)
