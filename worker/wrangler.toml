@@ -4,6 +4,9 @@ compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+[vars]
+CASDOOR_JWKS_URL = "https://sso.stellarglobalsupplies.com/.well-known/jwks"
+
 [observability]
 enabled = true
 
