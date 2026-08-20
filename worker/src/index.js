@@ -3,6 +3,7 @@ import { handleChat }                  from './routes/chat.js'
 import { handleImagine }               from './routes/imagine.js'
 import { handleSearch }                from './routes/search.js'
 import { handleRegister, handleLogin } from './routes/auth.js'
+import { handleSSOLogin } from './auth.js'
 import { handleHistory, handleDeleteSession, handleDeleteAllSessions } from './routes/history.js'
 import { verifyJWT }                   from './auth.js'
 
@@ -39,6 +40,7 @@ async function withAuth(req, env) {
 // ── Routes ──
 router.post('/api/auth/register', handleRegister)
 router.post('/api/auth/login',    handleLogin)
+router.post('/api/auth/sso',      handleSSOLogin)
 router.post('/api/chat',    withAuth, handleChat)
 router.post('/api/imagine', withAuth, handleImagine)
 router.get ('/api/history',       withAuth, handleHistory)
