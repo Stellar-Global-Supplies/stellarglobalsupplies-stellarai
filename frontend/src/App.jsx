@@ -18,13 +18,24 @@ function getStoredAuth() {
   } catch { return null }
 }
 
-export default function App() {
+// ── SSOCallback wrapper — no other hooks, clean early render ──
+function SSOCallbackPage() {
+  return (
+    <SSOCallback onLogin={(newToken, user) => {
+      localStorage.setItem('token', newToken)
+      localStorage.setItem('user', JSON.stringify(user))
+      window.location.replace('/')
+    }} />
+  )
+}
+
+// ── Main App — all hooks live here, no early returns ──────────
+function App() {
   const stored = getStoredAuth()
 
   const [auth, setAuth]                       = useState(stored)
   const [sidebarOpen, setSidebarOpen]         = useState(true)
   const [mobileSidebarOpen, setMobileSidebar] = useState(false)
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
   const [model, setModel]         = useState('llama-3.3-70b')
   const [entData, setEntData]     = useState(false)
   const [imgGen, setImgGen]       = useState(false)
@@ -37,15 +48,6 @@ export default function App() {
 
   const token = auth?.token || ''
 
-  // ✅ Handle /sso-callback before anything else
-  if (window.location.pathname === '/sso-callback') {
-    return (
-      <SSOCallback onLogin={(newToken, user) => {
-        setAuth({ token: newToken, user })
-      }} />
-    )
-  }
-
   useEffect(() => {
     if (!token) return
     fetch(`${WORKER_URL}/api/history`, {
@@ -55,10 +57,8 @@ export default function App() {
       .then(data => {
         if (data?.sessions) {
           setHistory(data.sessions.map(s => ({
-            id: s.id,
-            title: s.title || 'Untitled chat',
-            active: false,
-            ts: s.updated_at,
+            id: s.id, title: s.title || 'Untitled chat',
+            active: false, ts: s.updated_at,
           })))
         }
       })
@@ -90,9 +90,7 @@ export default function App() {
   }
 
   async function handleClearAll() {
-    setHistory([])
-    setMessages([])
-    setSessionId(null)
+    setHistory([]); setMessages([]); setSessionId(null)
     try {
       await fetch(`${WORKER_URL}/api/history/all`, {
         method: 'DELETE',
@@ -101,33 +99,23 @@ export default function App() {
     } catch {}
   }
 
-  // ✅ Sign out: clear localStorage + redirect to portal
   function handleLogout() {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
-    setAuth(null)
-    setMessages([])
-    setHistory([])
+    setAuth(null); setMessages([]); setHistory([])
     window.location.replace(LANDING_URL)
   }
 
   const sendMessage = useCallback(async ({ text, file, imgFile, imgPrompt }) => {
     if (isTyping) return
 
-    addMessage({
-      role: 'user',
-      text,
-      file: file?.name,
-      imgFile: imgFile?.name,
-      ts: Date.now(),
-    })
-
+    addMessage({ role: 'user', text, file: file?.name, imgFile: imgFile?.name, ts: Date.now() })
     setIsTyping(true)
 
     if (imgGen && imgPrompt) {
       addMessage({ role: 'assistant', text: '', status: 'Generating image…', imgPrompt, ts: Date.now() })
       try {
-        const res = await fetch(`${WORKER_URL}/api/imagine`, {
+        const res  = await fetch(`${WORKER_URL}/api/imagine`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ prompt: imgPrompt, model })
@@ -138,7 +126,7 @@ export default function App() {
         } else if (data.url) {
           updateLastAssistant(m => ({ ...m, status: null, imgUrl: data.url, text: `Here is the generated image for: "${imgPrompt}"` }))
         } else {
-          updateLastAssistant(m => ({ ...m, status: null, text: 'Image generation failed — no image returned from the server.' }))
+          updateLastAssistant(m => ({ ...m, status: null, text: 'Image generation failed — no image returned.' }))
         }
       } catch {
         updateLastAssistant(m => ({ ...m, status: null, text: 'Image generation failed. Please try again.' }))
@@ -168,17 +156,12 @@ export default function App() {
       } else {
         headers['Content-Type'] = 'application/json'
         body = JSON.stringify({
-          message: text,
-          model,
-          entData,
-          webSearch,
-          sessionId,
+          message: text, model, entData, webSearch, sessionId,
           history: messages.slice(-10).filter(m => m.text).map(m => ({ role: m.role, content: m.text }))
         })
       }
 
       const res = await fetch(`${WORKER_URL}/api/chat`, { method: 'POST', headers, body })
-
       if (res.status === 401) { handleLogout(); return }
       if (!res.ok) throw new Error(`Worker error ${res.status}`)
 
@@ -230,10 +213,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <div
-        className={`sidebar-overlay${mobileSidebarOpen ? ' show' : ''}`}
-        onClick={() => setMobileSidebar(false)}
-      />
+      <div className={`sidebar-overlay${mobileSidebarOpen ? ' show' : ''}`} onClick={() => setMobileSidebar(false)} />
       <Sidebar
         open={sidebarOpen}
         mobileOpen={mobileSidebarOpen}
@@ -244,22 +224,14 @@ export default function App() {
         onNewChat={() => { setMessages([]); setSessionId(null); setMobileSidebar(false) }}
         onSelectHistory={async id => {
           setHistory(prev => prev.map(h => ({ ...h, active: h.id === id })))
-          setSessionId(id)
-          setMessages([])
+          setSessionId(id); setMessages([])
           try {
-            const res = await fetch(`${WORKER_URL}/api/history?session_id=${id}`, {
-              headers: { Authorization: `Bearer ${token}` }
-            })
+            const res  = await fetch(`${WORKER_URL}/api/history?session_id=${id}`, { headers: { Authorization: `Bearer ${token}` } })
             const data = await res.json()
             if (data?.messages) {
-              setMessages(data.messages.map(m => ({
-                id: m.id,
-                role: m.role,
-                text: m.content,
-                ts: new Date(m.created_at).getTime(),
-              })))
+              setMessages(data.messages.map(m => ({ id: m.id, role: m.role, text: m.content, ts: new Date(m.created_at).getTime() })))
             }
-          } catch (e) { console.error('Load session error:', e) }
+          } catch {}
         }}
         onDeleteHistory={id => setHistory(prev => prev.filter(h => h.id !== id))}
       />
@@ -270,12 +242,9 @@ export default function App() {
             if (window.innerWidth <= 768) setMobileSidebar(o => !o)
             else setSidebarOpen(o => !o)
           }}
-          model={model}
-          onModelChange={setModel}
-          entData={entData}
-          onToggleEnt={() => setEntData(v => !v)}
-          imgGen={imgGen}
-          onToggleImg={() => setImgGen(v => !v)}
+          model={model} onModelChange={setModel}
+          entData={entData} onToggleEnt={() => setEntData(v => !v)}
+          imgGen={imgGen} onToggleImg={() => setImgGen(v => !v)}
           onClearAll={handleClearAll}
           onLogout={handleLogout}
         />
@@ -286,14 +255,18 @@ export default function App() {
           }
         </div>
         <InputArea
-          onSend={sendMessage}
-          isTyping={isTyping}
-          imgGen={imgGen}
-          webSearch={webSearch}
+          onSend={sendMessage} isTyping={isTyping}
+          imgGen={imgGen} webSearch={webSearch}
           onToggleWebSearch={() => setWebSearch(v => !v)}
           model={model}
         />
       </main>
     </div>
   )
+}
+
+// ── Root — decides which component to render, no hooks ────────
+export default function Root() {
+  if (window.location.pathname === '/sso-callback') return <SSOCallbackPage />
+  return <App />
 }
