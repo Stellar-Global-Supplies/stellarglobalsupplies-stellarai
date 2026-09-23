@@ -105,8 +105,6 @@ export async function testRevenium(env) {
   const apiKey = await getReveniumApiKey(env);
   const hasApiKey = Boolean(apiKey);
 
-  console.log("[revenium-test] key resolved:", hasApiKey);
-
   if (!hasApiKey) {
     return {
       success: false,
@@ -200,8 +198,6 @@ export async function reportUsage(
 ) {
   const apiKey = await getReveniumApiKey(env);
   const hasApiKey = Boolean(apiKey);
-
-  console.log("[revenium] key resolved:", hasApiKey);
 
   if (!hasApiKey) {
     console.warn(
