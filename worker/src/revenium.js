@@ -103,23 +103,11 @@ function normalizeUsage(usage) {
  */
 export async function testRevenium(env) {
   const apiKey = await getReveniumApiKey(env);
+  const hasApiKey = Boolean(apiKey);
 
-  console.log(
-    "[revenium-test] key resolved:",
-    !!apiKey
-  );
+  console.log("[revenium-test] key resolved:", hasApiKey);
 
-  console.log(
-    "[revenium-test] key prefix:",
-    apiKey ? apiKey.slice(0, 4) : "none"
-  );
-
-  console.log(
-    "[revenium-test] key length:",
-    apiKey?.length ?? 0
-  );
-
-  if (!apiKey) {
+  if (!hasApiKey) {
     return {
       success: false,
       status: 0,
@@ -211,24 +199,11 @@ export async function reportUsage(
   }
 ) {
   const apiKey = await getReveniumApiKey(env);
+  const hasApiKey = Boolean(apiKey);
 
-  // Safe diagnostics — NEVER log the actual API key.
-  console.log(
-    "[revenium] key resolved:",
-    !!apiKey
-  );
+  console.log("[revenium] key resolved:", hasApiKey);
 
-  console.log(
-    "[revenium] key prefix:",
-    apiKey ? apiKey.slice(0, 4) : "none"
-  );
-
-  console.log(
-    "[revenium] key length:",
-    apiKey?.length ?? 0
-  );
-
-  if (!apiKey) {
+  if (!hasApiKey) {
     console.warn(
       "[revenium] REVENIUM_API_KEY not available — skipping usage report"
     );
@@ -334,9 +309,7 @@ export async function reportUsage(
             statusText: response.statusText,
             body,
             endpoint: REVENIUM_METERING_URL,
-            hasApiKey: !!apiKey,
-            apiKeyPrefix: apiKey.slice(0, 4),
-            apiKeyLength: apiKey.length,
+            hasApiKey,
           })
       );
 
