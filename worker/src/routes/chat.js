@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless'
 import { parseFile } from '../fileParser.js'
 import { tavilySearch } from '../tavily.js'
+import { reportUsage, estimateTokens } from '../revenium.js'
 
 const SYSTEM_PROMPT = `You are Stellar AI, an intelligent assistant for Stellar Global Supplies — an Indian industrial supply company. You help with procurement analysis, supplier evaluation, pricing intelligence, inventory management, and data analysis.
 
@@ -240,6 +241,7 @@ export async function handleChat(req, env, ctx) {
       ]
 
       // ── Call Cloudflare Workers AI ───────────────────────────────────────────
+      const aiCallStart = Date.now()
       const aiStream = await env.AI.run(cfModel, {
         messages,
         max_tokens: 4096,
@@ -280,6 +282,22 @@ export async function handleChat(req, env, ctx) {
 
       const realSessionId = await persistMessages(env.DB, req.user.id, message, fullReply, model, sessionId)
       sse(writer, enc, 'done', { sessionId: realSessionId })
+
+      // Workers AI streaming doesn't return a usage block, so tokens are
+      // estimated from the message/reply text (see estimateTokens' doc comment).
+      const inputTokenEstimate = estimateTokens(messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(' '))
+      const outputTokenEstimate = estimateTokens(fullReply)
+      ctx.waitUntil(reportUsage(env, {
+        model: cfModel,
+        sessionId: realSessionId || req.user?.id,
+        usage: {
+          inputTokenCount: inputTokenEstimate,
+          outputTokenCount: outputTokenEstimate,
+          totalTokenCount: inputTokenEstimate + outputTokenEstimate,
+        },
+        operationType: 'CHAT',
+        requestStartTime: aiCallStart,
+      }))
 
     } catch (err) {
       console.error('Chat error:', err.message, err.stack)
